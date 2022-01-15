@@ -1,0 +1,27 @@
+[package]
+name = "keeper-service"
+version = "0.1.0"
+edition = "2018"
+default-run = "main"
+
+[dependencies]
+anyhow = "1.0.32"
+ethers = { git = "https://github.com/gakonst/ethers-rs", features=["ws", "openssl", "abigen"] }
+ethers-core = { git = "https://github.com/gakonst/ethers-rs" }
+exitcode = "1.1.2"
+serde_json = "1.0.57"
+serde_with = "1.10.0"
+tokio = { version = "1.11.0", features = ["full"] }
+
+# CLI
+gumdrop = "0.8.0"
+
+# Logging
+tracing = "0.1.29"
+tracing-subscriber = {version="0.2.25", features =["default", "json"]}
+serde = "1.0.130"
+thiserror = "1.0.20"
+
+[build-dependencies]
+anyhow = "1.0.32"
+ethers = { git = "https://github.com/gakonst/ethers-rs", features=["abigen"] }

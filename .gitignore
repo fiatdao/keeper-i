@@ -1,0 +1,6 @@
+# rust
+/target
+
+# secrets
+.env
+private_key
