@@ -7,3 +7,6 @@
 # secrets
 .env
 private_key
+
+# keeper-service
+state.json
