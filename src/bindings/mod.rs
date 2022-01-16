@@ -15,7 +15,10 @@ pub use imulticall2::CallData as IMulticall2Call;
 pub use imulticall2::ResultData as IMulticall2Result;
 pub use imulticall2::*;
 
-// pub type VaultIdType = [u8; 12];
+// keccak256(VaultAddr, TokenId, UserAddr)
+pub type PositionIdType = [u8; 32];
+// VaultAddr
+pub type VaultIdType = [u8; 20];
+// TokenId
+pub type TokenIdType = [u8; 32];
 // pub type BaseIdType = [u8; 6];
-// pub type IlkIdType = [u8; 6];
-// pub type SeriesIdType = [u8; 6];

@@ -1647,6 +1647,7 @@ dependencies = [
  "ethers",
  "ethers-core",
  "exitcode",
+ "futures-util",
  "gumdrop",
  "serde",
  "serde_json",

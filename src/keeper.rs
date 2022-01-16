@@ -1,7 +1,8 @@
 use crate::{
     bindings::Codex,
-    // borrowers::{Borrowers, VaultMap},
     escalator::GeometricGasPrice,
+    // borrowers::{Borrowers, VaultMap},
+    positions::{PositionMap, Positions},
     // liquidations::{AuctionMap, Liquidator},
     Result,
 };
@@ -23,8 +24,8 @@ pub struct State {
     // #[serde_as(as = "Vec<(_, _)>")]
     // auctions: AuctionMap,
     // /// The borrowers being monitored
-    // #[serde_as(as = "Vec<(_, _)>")]
-    // vaults: VaultMap,
+    #[serde_as(as = "Vec<(_, _)>")]
+    positions: PositionMap,
     /// The last observed block
     last_block: u64,
 }
@@ -36,6 +37,7 @@ pub struct Keeper<M> {
     last_block: U64,
 
     // borrowers: Borrowers<M>,
+    positions: Positions<M>,
     // liquidator: Liquidator<M>,
     instance_name: String,
 }
@@ -59,9 +61,9 @@ impl<M: Middleware> Keeper<M> {
         //     Some(state) => (state.vaults, state.auctions, state.last_block.into()),
         //     None => (HashMap::new(), HashMap::new(), 0.into()),
         // };
-        let last_block = match state {
-            Some(state) => (state.last_block.into()),
-            None => (0.into()),
+        let (positions, last_block) = match state {
+            Some(state) => (state.positions, state.last_block.into()),
+            None => (HashMap::new(), 0.into()),
         };
         let codex = Codex::new(codex_, client.clone());
         // let witch = Witch::new(liquidator, client.clone());
@@ -76,6 +78,15 @@ impl<M: Middleware> Keeper<M> {
         //     instance_name.clone(),
         // )
         // .await;
+        let positions = Positions::new(
+            codex_,
+            multicall2,
+            multicall_batch_size,
+            client.clone(),
+            positions,
+            instance_name.clone(),
+        )
+        .await;
         // let liquidator = Liquidator::new(
         //     controller,
         //     liquidations,
@@ -94,6 +105,7 @@ impl<M: Middleware> Keeper<M> {
         Ok(Self {
             client,
             // borrowers,
+            positions,
             // liquidator,
             last_block,
             instance_name: instance_name.clone(),
@@ -247,6 +259,11 @@ impl<M: Middleware> Keeper<M> {
         //     .update_vaults(self.last_block, block_number)
         //     .await?;
 
+        // 2. update our dataset with the new block's data
+        self.positions
+            .update_positions(self.last_block, block_number)
+            .await?;
+
         // // 3. trigger the auction for any undercollateralized borrowers
         // self.liquidator
         //     .start_auctions(self.borrowers.vaults.iter(), gas_price)
@@ -264,7 +281,7 @@ impl<M: Middleware> Keeper<M> {
             w,
             &State {
                 // auctions: self.liquidator.auctions.clone(),
-                // vaults: self.borrowers.vaults.clone(),
+                positions: self.positions.positions.clone(),
                 last_block: self.last_block.as_u64(),
             },
         )
