@@ -2,8 +2,12 @@
 //!
 //! This module is responsible for keeping track of open positions and observing their debt healthiness.
 use crate::{
-    bindings::Codex, bindings::IMulticall2, bindings::IMulticall2Call, bindings::PositionIdType,
-    bindings::TokenIdType, bindings::VaultIdType, Result,
+    bindings::Codex,
+    // bindings::IMulticall2, bindings::IMulticall2Call,
+    bindings::PositionIdType,
+    bindings::TokenIdType,
+    bindings::VaultIdType,
+    Result,
 };
 
 use core::cmp::Ordering;
@@ -11,12 +15,16 @@ use ethers::prelude::*;
 // use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
-use tracing::{debug, debug_span, info, instrument, trace, warn};
+use tracing::{
+    debug,
+    debug_span,
+    instrument, // info, trace, warn
+};
 
 pub type PositionMap = HashMap<PositionIdType, Position>;
 
 #[derive(Clone)]
-pub struct Positions<M> {
+pub struct PositionsWatcher<M> {
     /// The cauldron smart contract
     // pub cauldron: Cauldron<M>,
     // pub liquidator: Witch<M>,
@@ -25,49 +33,35 @@ pub struct Positions<M> {
     /// Mapping of the addresses that have taken loans from the system and might
     /// be susceptible to liquidations
     pub positions: PositionMap,
+    // We use multicall to batch together calls and have reduced stress on
+    // our RPC endpoint
+    // multicall2: IMulticall2<M>,
+    // multicall_batch_size: usize,
 
-    /// We use multicall to batch together calls and have reduced stress on
-    /// our RPC endpoint
-    multicall2: IMulticall2<M>,
-    multicall_batch_size: usize,
-
-    instance_name: String,
+    // instance_name: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 /// A position's details
 pub struct Position {
     pub position_id: PositionIdType,
-
     pub under_auction: bool,
-
     pub vault_id: VaultIdType,
-
     pub token_id: TokenIdType,
-
     pub user: H160,
-
     pub collateral: U256,
-
     pub normal_debt: U256,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Ord)]
 pub struct PositionUpdate {
     pub block_number: U64,
-
     pub transaction_index: U64,
-
     pub position_id: PositionIdType,
-
     pub vault_id: VaultIdType,
-
     pub token_id: TokenIdType,
-
     pub user: H160,
-
     pub delta_collateral: I256,
-
     pub delta_normal_debt: I256,
 }
 
@@ -80,27 +74,26 @@ impl PartialOrd for PositionUpdate {
     }
 }
 
-impl<M: Middleware> Positions<M> {
+impl<M: Middleware> PositionsWatcher<M> {
     /// Constructor
     pub async fn new(
-        // cauldron: Address,
         // liquidator: Address,
         codex_: Address,
-        multicall2: Address,
-        multicall_batch_size: usize,
+        _multicall2: Address,
+        _multicall_batch_size: usize,
         client: Arc<M>,
         positions: HashMap<PositionIdType, Position>,
-        instance_name: String,
+        _instance_name: String,
     ) -> Self {
-        let multicall2 = IMulticall2::new(multicall2, client.clone());
-        Positions {
+        // let multicall2 = IMulticall2::new(multicall2, client.clone());
+        PositionsWatcher {
             // cauldron: Cauldron::new(cauldron, client.clone()),
             // liquidator: Witch::new(liquidator, client),
             codex: Codex::new(codex_, client),
             positions,
-            multicall2,
-            multicall_batch_size,
-            instance_name,
+            //     multicall2,
+            //     multicall_batch_size,
+            //     instance_name,
         }
     }
 

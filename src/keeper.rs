@@ -1,8 +1,6 @@
 use crate::{
-    bindings::Codex,
     escalator::GeometricGasPrice,
-    // borrowers::{Borrowers, VaultMap},
-    positions::{PositionMap, Positions},
+    positions::{PositionMap, PositionsWatcher},
     // liquidations::{AuctionMap, Liquidator},
     Result,
 };
@@ -36,8 +34,7 @@ pub struct Keeper<M> {
     client: Arc<M>,
     last_block: U64,
 
-    // borrowers: Borrowers<M>,
-    positions: Positions<M>,
+    positions_watcher: PositionsWatcher<M>,
     // liquidator: Liquidator<M>,
     instance_name: String,
 }
@@ -50,10 +47,10 @@ impl<M: Middleware> Keeper<M> {
         codex_: Address,
         multicall2: Address,
         multicall_batch_size: usize,
-        min_ratio: u16,
-        gas_boost: u16,
-        gas_escalator: GeometricGasPrice,
-        bump_gas_delay: u64,
+        _min_ratio: u16,
+        _gas_boost: u16,
+        _gas_escalator: GeometricGasPrice,
+        _bump_gas_delay: u64,
         state: Option<State>,
         instance_name: String,
     ) -> Result<Keeper<M>, M> {
@@ -65,20 +62,7 @@ impl<M: Middleware> Keeper<M> {
             Some(state) => (state.positions, state.last_block.into()),
             None => (HashMap::new(), 0.into()),
         };
-        let codex = Codex::new(codex_, client.clone());
-        // let witch = Witch::new(liquidator, client.clone());
-        // let controller = witch.cauldron().call().await?;
-        // let borrowers = Borrowers::new(
-        //     controller,
-        //     liquidations,
-        //     multicall2,
-        //     multicall_batch_size,
-        //     client.clone(),
-        //     vaults,
-        //     instance_name.clone(),
-        // )
-        // .await;
-        let positions = Positions::new(
+        let positions_watcher = PositionsWatcher::new(
             codex_,
             multicall2,
             multicall_batch_size,
@@ -104,8 +88,7 @@ impl<M: Middleware> Keeper<M> {
 
         Ok(Self {
             client,
-            // borrowers,
-            positions,
+            positions_watcher,
             // liquidator,
             last_block,
             instance_name: instance_name.clone(),
@@ -245,22 +228,17 @@ impl<M: Middleware> Keeper<M> {
     #[instrument(skip(self), fields(self.instance_name))]
     async fn on_block(&mut self, block_number: U64) -> Result<(), M> {
         // Get the gas price - TODO: Replace with gas price oracle
-        let gas_price = self
-            .client
-            .get_gas_price()
-            .await
-            .map_err(ContractError::MiddlewareError)?;
+        // let gas_price = self
+        //     .client
+        //     .get_gas_price()
+        //     .await
+        //     .map_err(ContractError::MiddlewareError)?;
 
         // // 1. Check if our transactions have been mined
         // self.liquidator.remove_or_bump().await?;
 
-        // // 2. update our dataset with the new block's data
-        // self.borrowers
-        //     .update_vaults(self.last_block, block_number)
-        //     .await?;
-
         // 2. update our dataset with the new block's data
-        self.positions
+        self.positions_watcher
             .update_positions(self.last_block, block_number)
             .await?;
 
@@ -281,7 +259,7 @@ impl<M: Middleware> Keeper<M> {
             w,
             &State {
                 // auctions: self.liquidator.auctions.clone(),
-                positions: self.positions.positions.clone(),
+                positions: self.positions_watcher.positions.clone(),
                 last_block: self.last_block.as_u64(),
             },
         )
