@@ -13,6 +13,8 @@ fi
 
 set -o nounset
 
+> state.json
+
 RUST_BACKTRACE=1 RUST_LOG="main,keeper=debug" cargo run -- \
     --config ./addrs.json \
     --private-key ./private_key \

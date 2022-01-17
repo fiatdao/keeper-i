@@ -22,12 +22,20 @@ use tracing::{
     instrument, // info, trace, warn
 };
 
+fn compute_position_id(vault: H160, token_id: U256, user: H160) -> PositionIdType {
+    ethers::utils::keccak256(ethers::abi::encode(&[
+        ethers::abi::Token::Address(vault.clone()),
+        ethers::abi::Token::Uint(token_id.into()),
+        ethers::abi::Token::Address(user.clone()),
+    ]))
+}
+
+pub type UpdateIdType = [u8; 32];
+
 pub type PositionMap = HashMap<PositionIdType, Position>;
 
 #[derive(Clone)]
 pub struct PositionsWatcher<M> {
-    /// The cauldron smart contract
-    // pub cauldron: Cauldron<M>,
     // pub liquidator: Witch<M>,
     pub codex: Codex<M>,
 
@@ -75,12 +83,49 @@ impl PartialOrd for PositionUpdate {
     }
 }
 
-fn compute_position_id(vault: H160, token_id: U256, user: H160) -> PositionIdType {
-    ethers::utils::keccak256(ethers::abi::encode(&[
-        ethers::abi::Token::Address(vault.clone()),
-        ethers::abi::Token::Uint(token_id.into()),
-        ethers::abi::Token::Address(user.clone()),
-    ]))
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Ord)]
+pub struct RateUpdate {
+    pub block_number: U64,
+    pub transaction_index: U64,
+    pub rate_id: PositionIdType,
+    pub value: U256,
+}
+
+impl PartialOrd for RateUpdate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self.block_number == other.block_number {
+            return Some(self.transaction_index.cmp(&other.transaction_index));
+        }
+        Some(self.block_number.cmp(&other.block_number))
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Eq, Ord)]
+pub struct Update<T> {
+    pub update_id: UpdateIdType, 
+    pub block_number: U64,
+    pub transaction_index: U64,
+    pub data: T,
+}
+
+impl<T> PartialEq for Update<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.update_id == other.update_id
+    }
+}
+
+impl<T> PartialOrd for Update<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self.block_number == other.block_number {
+            return Some(self.transaction_index.cmp(&other.transaction_index));
+        }
+        Some(self.block_number.cmp(&other.block_number))
+    }
+}
+
+enum UpdateTypes {
+    PositionUpdate(PositionUpdate),
+    RateUpdate(RateUpdate),
 }
 
 impl<M: Middleware> PositionsWatcher<M> {
@@ -141,67 +186,87 @@ impl<M: Middleware> PositionsWatcher<M> {
         )
         .unwrap();
 
-        let mut modify_collateral_and_debt_updates: Vec<PositionUpdate> =
+        let mut modify_collateral_and_debt_updates: Vec<Update<PositionUpdate>> =
             modify_collateral_and_debt_events
                 .into_iter()
-                .map(|(x, meta)| PositionUpdate {
+                .map(|(x, meta)| Update {
+                    update_id: compute_position_id(x.vault, x.token_id, x.user),
                     block_number: meta.block_number,
                     transaction_index: meta.transaction_index,
-                    position_id: compute_position_id(x.vault, x.token_id, x.user),
-                    vault_id: x.vault.into(),
-                    token_id: x.token_id.into(),
-                    user: x.user,
-                    delta_collateral: x.delta_collateral,
-                    delta_normal_debt: x.delta_normal_debt,
+                    data: PositionUpdate {
+                        block_number: meta.block_number,
+                        transaction_index: meta.transaction_index,
+                        position_id: compute_position_id(x.vault, x.token_id, x.user),
+                        vault_id: x.vault.into(),
+                        token_id: x.token_id.into(),
+                        user: x.user,
+                        delta_collateral: x.delta_collateral,
+                        delta_normal_debt: x.delta_normal_debt,
+                    }
                 })
                 .collect();
 
-        let mut transfer_collateral_and_debt_updates: Vec<PositionUpdate> =
+        let mut transfer_collateral_and_debt_updates: Vec<Update<PositionUpdate>> =
             transfer_collateral_and_debt_events
                 .into_iter()
                 .map(|(x, meta)| {
                     [
-                        PositionUpdate {
+                        Update {
+                            update_id: compute_position_id(x.vault, x.token_id, x.src),
                             block_number: meta.block_number,
                             transaction_index: meta.transaction_index,
-                            position_id: compute_position_id(x.vault, x.token_id, x.src),
-                            vault_id: x.vault.into(),
-                            token_id: x.token_id.into(),
-                            user: x.src,
-                            delta_collateral: -x.delta_collateral,
-                            delta_normal_debt: -x.delta_normal_debt,
+                            data: PositionUpdate {
+                                block_number: meta.block_number,
+                                transaction_index: meta.transaction_index,
+                                position_id: compute_position_id(x.vault, x.token_id, x.src),
+                                vault_id: x.vault.into(),
+                                token_id: x.token_id.into(),
+                                user: x.src,
+                                delta_collateral: -x.delta_collateral,
+                                delta_normal_debt: -x.delta_normal_debt,
+                            },
                         },
-                        PositionUpdate {
+                        Update {
+                            update_id: compute_position_id(x.vault, x.token_id, x.dst),
                             block_number: meta.block_number,
                             transaction_index: meta.transaction_index,
-                            position_id: compute_position_id(x.vault, x.token_id, x.dst),
-                            vault_id: x.vault.into(),
-                            token_id: x.token_id.into(),
-                            user: x.dst,
-                            delta_collateral: x.delta_collateral,
-                            delta_normal_debt: x.delta_normal_debt,
+                            data: PositionUpdate {
+                                block_number: meta.block_number,
+                                transaction_index: meta.transaction_index,
+                                position_id: compute_position_id(x.vault, x.token_id, x.dst),
+                                vault_id: x.vault.into(),
+                                token_id: x.token_id.into(),
+                                user: x.dst,
+                                delta_collateral: x.delta_collateral,
+                                delta_normal_debt: x.delta_normal_debt,
+                            },
                         },
                     ]
                 })
                 .flatten()
                 .collect();
 
-        let mut confiscate_collateral_and_debt_updates: Vec<PositionUpdate> =
-            confiscate_collateral_and_debt_events
-                .into_iter()
-                .map(|(x, meta)| PositionUpdate {
-                    block_number: meta.block_number,
-                    transaction_index: meta.transaction_index,
-                    position_id: compute_position_id(x.vault, x.token_id, x.user),
-                    vault_id: x.vault.into(),
-                    token_id: x.token_id.into(),
-                    user: x.user,
-                    delta_collateral: x.delta_collateral,
-                    delta_normal_debt: x.delta_normal_debt,
-                })
-                .collect();
+                let mut confiscate_collateral_and_debt_updates: Vec<Update<PositionUpdate>> =
+                confiscate_collateral_and_debt_events
+                    .into_iter()
+                    .map(|(x, meta)| Update {
+                        update_id: compute_position_id(x.vault, x.token_id, x.user),
+                        block_number: meta.block_number,
+                        transaction_index: meta.transaction_index,
+                        data: PositionUpdate {
+                            block_number: meta.block_number,
+                            transaction_index: meta.transaction_index,
+                            position_id: compute_position_id(x.vault, x.token_id, x.user),
+                            vault_id: x.vault.into(),
+                            token_id: x.token_id.into(),
+                            user: x.user,
+                            delta_collateral: x.delta_collateral,
+                            delta_normal_debt: x.delta_normal_debt,
+                        }
+                    })
+                    .collect();
 
-        let mut all_updates: Vec<PositionUpdate> = Vec::new();
+        let mut all_updates: Vec<Update<UpdateTypes>> = Vec::new();
         all_updates.append(&mut modify_collateral_and_debt_updates);
         all_updates.append(&mut transfer_collateral_and_debt_updates);
         all_updates.append(&mut confiscate_collateral_and_debt_updates);
