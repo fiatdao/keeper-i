@@ -9,9 +9,10 @@ use crate::{
     bindings::VaultIdType,
     Result,
 };
-
 use core::cmp::Ordering;
 use ethers::prelude::*;
+use futures_util::try_join;
+
 // use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
@@ -74,6 +75,14 @@ impl PartialOrd for PositionUpdate {
     }
 }
 
+fn compute_position_id(vault: H160, token_id: U256, user: H160) -> PositionIdType {
+    ethers::utils::keccak256(ethers::abi::encode(&[
+        ethers::abi::Token::Address(vault.clone()),
+        ethers::abi::Token::Uint(token_id.into()),
+        ethers::abi::Token::Address(user.clone()),
+    ]))
+}
+
 impl<M: Middleware> PositionsWatcher<M> {
     /// Constructor
     pub async fn new(
@@ -105,96 +114,92 @@ impl<M: Middleware> PositionsWatcher<M> {
         let span = debug_span!("monitoring");
         let _enter = span.enter();
 
-        let mut modify_collateral_and_debt_updates: Vec<PositionUpdate> = self
+        let modify_collateral_and_debt_query = self
             .codex
             .modify_collateral_and_debt_filter()
             .from_block(from_block)
-            .to_block(to_block)
-            .query_with_meta()
-            .await?
-            .into_iter()
-            .map(|(x, meta)| PositionUpdate {
-                block_number: meta.block_number,
-                transaction_index: meta.transaction_index,
-                position_id: ethers::utils::keccak256(ethers::abi::encode(&[
-                    ethers::abi::Token::Address(x.vault.clone()),
-                    ethers::abi::Token::Uint(x.token_id.into()),
-                    ethers::abi::Token::Address(x.user.clone()),
-                ])),
-                vault_id: x.vault.into(),
-                token_id: x.token_id.into(),
-                user: x.user,
-                delta_collateral: x.delta_collateral,
-                delta_normal_debt: x.delta_normal_debt,
-            })
-            .collect();
-
-        let mut transfer_collateral_and_debt_updates: Vec<PositionUpdate> = self
+            .to_block(to_block);
+        let transfer_collateral_and_debt_query = self
             .codex
             .transfer_collateral_and_debt_filter()
             .from_block(from_block)
-            .to_block(to_block)
-            .query_with_meta()
-            .await?
-            .into_iter()
-            .map(|(x, meta)| {
-                [
-                    PositionUpdate {
-                        block_number: meta.block_number,
-                        transaction_index: meta.transaction_index,
-                        position_id: ethers::utils::keccak256(ethers::abi::encode(&[
-                            ethers::abi::Token::Address(x.vault.clone()),
-                            ethers::abi::Token::Uint(x.token_id.into()),
-                            ethers::abi::Token::Address(x.src.clone()),
-                        ])),
-                        vault_id: x.vault.into(),
-                        token_id: x.token_id.into(),
-                        user: x.src,
-                        delta_collateral: -x.delta_collateral,
-                        delta_normal_debt: -x.delta_normal_debt,
-                    },
-                    PositionUpdate {
-                        block_number: meta.block_number,
-                        transaction_index: meta.transaction_index,
-                        position_id: ethers::utils::keccak256(ethers::abi::encode(&[
-                            ethers::abi::Token::Address(x.vault.clone()),
-                            ethers::abi::Token::Uint(x.token_id.into()),
-                            ethers::abi::Token::Address(x.dst.clone()),
-                        ])),
-                        vault_id: x.vault.into(),
-                        token_id: x.token_id.into(),
-                        user: x.dst,
-                        delta_collateral: x.delta_collateral,
-                        delta_normal_debt: x.delta_normal_debt,
-                    },
-                ]
-            })
-            .flatten()
-            .collect();
-
-        let mut confiscate_collateral_and_debt_updates: Vec<PositionUpdate> = self
+            .to_block(to_block);
+        let confiscate_collateral_and_debt_query = self
             .codex
             .confiscate_collateral_and_debt_filter()
             .from_block(from_block)
-            .to_block(to_block)
-            .query_with_meta()
-            .await?
-            .into_iter()
-            .map(|(x, meta)| PositionUpdate {
-                block_number: meta.block_number,
-                transaction_index: meta.transaction_index,
-                position_id: ethers::utils::keccak256(ethers::abi::encode(&[
-                    ethers::abi::Token::Address(x.vault.clone()),
-                    ethers::abi::Token::Uint(x.token_id.into()),
-                    ethers::abi::Token::Address(x.user.clone()),
-                ])),
-                vault_id: x.vault.into(),
-                token_id: x.token_id.into(),
-                user: x.user,
-                delta_collateral: x.delta_collateral,
-                delta_normal_debt: x.delta_normal_debt,
-            })
-            .collect();
+            .to_block(to_block);
+
+        let (
+            modify_collateral_and_debt_events,
+            transfer_collateral_and_debt_events,
+            confiscate_collateral_and_debt_events,
+        ) = try_join!(
+            modify_collateral_and_debt_query.query_with_meta(),
+            transfer_collateral_and_debt_query.query_with_meta(),
+            confiscate_collateral_and_debt_query.query_with_meta()
+        )
+        .unwrap();
+
+        let mut modify_collateral_and_debt_updates: Vec<PositionUpdate> =
+            modify_collateral_and_debt_events
+                .into_iter()
+                .map(|(x, meta)| PositionUpdate {
+                    block_number: meta.block_number,
+                    transaction_index: meta.transaction_index,
+                    position_id: compute_position_id(x.vault, x.token_id, x.user),
+                    vault_id: x.vault.into(),
+                    token_id: x.token_id.into(),
+                    user: x.user,
+                    delta_collateral: x.delta_collateral,
+                    delta_normal_debt: x.delta_normal_debt,
+                })
+                .collect();
+
+        let mut transfer_collateral_and_debt_updates: Vec<PositionUpdate> =
+            transfer_collateral_and_debt_events
+                .into_iter()
+                .map(|(x, meta)| {
+                    [
+                        PositionUpdate {
+                            block_number: meta.block_number,
+                            transaction_index: meta.transaction_index,
+                            position_id: compute_position_id(x.vault, x.token_id, x.src),
+                            vault_id: x.vault.into(),
+                            token_id: x.token_id.into(),
+                            user: x.src,
+                            delta_collateral: -x.delta_collateral,
+                            delta_normal_debt: -x.delta_normal_debt,
+                        },
+                        PositionUpdate {
+                            block_number: meta.block_number,
+                            transaction_index: meta.transaction_index,
+                            position_id: compute_position_id(x.vault, x.token_id, x.dst),
+                            vault_id: x.vault.into(),
+                            token_id: x.token_id.into(),
+                            user: x.dst,
+                            delta_collateral: x.delta_collateral,
+                            delta_normal_debt: x.delta_normal_debt,
+                        },
+                    ]
+                })
+                .flatten()
+                .collect();
+
+        let mut confiscate_collateral_and_debt_updates: Vec<PositionUpdate> =
+            confiscate_collateral_and_debt_events
+                .into_iter()
+                .map(|(x, meta)| PositionUpdate {
+                    block_number: meta.block_number,
+                    transaction_index: meta.transaction_index,
+                    position_id: compute_position_id(x.vault, x.token_id, x.user),
+                    vault_id: x.vault.into(),
+                    token_id: x.token_id.into(),
+                    user: x.user,
+                    delta_collateral: x.delta_collateral,
+                    delta_normal_debt: x.delta_normal_debt,
+                })
+                .collect();
 
         let mut all_updates: Vec<PositionUpdate> = Vec::new();
         all_updates.append(&mut modify_collateral_and_debt_updates);
