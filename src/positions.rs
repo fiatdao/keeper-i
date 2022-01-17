@@ -62,7 +62,39 @@ pub struct Position {
     pub normal_debt: U256,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Ord)]
+#[derive(Debug, Eq)]
+pub struct GenericUpdate<T> {
+    pub update_id: UpdateIdType,
+    pub block_number: U64,
+    pub transaction_index: U64,
+    pub data: T,
+}
+
+impl<T: Eq> PartialEq for GenericUpdate<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.update_id == other.update_id
+    }
+}
+
+impl<T: Eq> PartialOrd for GenericUpdate<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self.block_number == other.block_number {
+            return Some(self.transaction_index.cmp(&other.transaction_index));
+        }
+        Some(self.block_number.cmp(&other.block_number))
+    }
+}
+
+impl<T: Eq> Ord for GenericUpdate<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.block_number == other.block_number {
+            return self.transaction_index.cmp(&other.transaction_index);
+        }
+        self.block_number.cmp(&other.block_number)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct PositionUpdate {
     pub block_number: U64,
     pub transaction_index: U64,
@@ -74,16 +106,7 @@ pub struct PositionUpdate {
     pub delta_normal_debt: I256,
 }
 
-impl PartialOrd for PositionUpdate {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.block_number == other.block_number {
-            return Some(self.transaction_index.cmp(&other.transaction_index));
-        }
-        Some(self.block_number.cmp(&other.block_number))
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Ord)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RateUpdate {
     pub block_number: U64,
     pub transaction_index: U64,
@@ -91,41 +114,10 @@ pub struct RateUpdate {
     pub value: U256,
 }
 
-impl PartialOrd for RateUpdate {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.block_number == other.block_number {
-            return Some(self.transaction_index.cmp(&other.transaction_index));
-        }
-        Some(self.block_number.cmp(&other.block_number))
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Eq, Ord)]
-pub struct Update<T> {
-    pub update_id: UpdateIdType, 
-    pub block_number: U64,
-    pub transaction_index: U64,
-    pub data: T,
-}
-
-impl<T> PartialEq for Update<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.update_id == other.update_id
-    }
-}
-
-impl<T> PartialOrd for Update<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.block_number == other.block_number {
-            return Some(self.transaction_index.cmp(&other.transaction_index));
-        }
-        Some(self.block_number.cmp(&other.block_number))
-    }
-}
-
-enum UpdateTypes {
-    PositionUpdate(PositionUpdate),
-    RateUpdate(RateUpdate),
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Update {
+    PositionUpdate(GenericUpdate<PositionUpdate>),
+    RateUpdate(GenericUpdate<RateUpdate>),
 }
 
 impl<M: Middleware> PositionsWatcher<M> {
@@ -186,10 +178,10 @@ impl<M: Middleware> PositionsWatcher<M> {
         )
         .unwrap();
 
-        let mut modify_collateral_and_debt_updates: Vec<Update<PositionUpdate>> =
-            modify_collateral_and_debt_events
-                .into_iter()
-                .map(|(x, meta)| Update {
+        let mut modify_collateral_and_debt_updates: Vec<Update> = modify_collateral_and_debt_events
+            .into_iter()
+            .map(|(x, meta)| {
+                Update::PositionUpdate(GenericUpdate::<PositionUpdate> {
                     update_id: compute_position_id(x.vault, x.token_id, x.user),
                     block_number: meta.block_number,
                     transaction_index: meta.transaction_index,
@@ -202,16 +194,17 @@ impl<M: Middleware> PositionsWatcher<M> {
                         user: x.user,
                         delta_collateral: x.delta_collateral,
                         delta_normal_debt: x.delta_normal_debt,
-                    }
+                    },
                 })
-                .collect();
+            })
+            .collect();
 
-        let mut transfer_collateral_and_debt_updates: Vec<Update<PositionUpdate>> =
+        let mut transfer_collateral_and_debt_updates: Vec<Update> =
             transfer_collateral_and_debt_events
                 .into_iter()
                 .map(|(x, meta)| {
                     [
-                        Update {
+                        Update::PositionUpdate(GenericUpdate::<PositionUpdate> {
                             update_id: compute_position_id(x.vault, x.token_id, x.src),
                             block_number: meta.block_number,
                             transaction_index: meta.transaction_index,
@@ -225,8 +218,8 @@ impl<M: Middleware> PositionsWatcher<M> {
                                 delta_collateral: -x.delta_collateral,
                                 delta_normal_debt: -x.delta_normal_debt,
                             },
-                        },
-                        Update {
+                        }),
+                        Update::PositionUpdate(GenericUpdate::<PositionUpdate> {
                             update_id: compute_position_id(x.vault, x.token_id, x.dst),
                             block_number: meta.block_number,
                             transaction_index: meta.transaction_index,
@@ -240,16 +233,17 @@ impl<M: Middleware> PositionsWatcher<M> {
                                 delta_collateral: x.delta_collateral,
                                 delta_normal_debt: x.delta_normal_debt,
                             },
-                        },
+                        }),
                     ]
                 })
                 .flatten()
                 .collect();
 
-                let mut confiscate_collateral_and_debt_updates: Vec<Update<PositionUpdate>> =
-                confiscate_collateral_and_debt_events
-                    .into_iter()
-                    .map(|(x, meta)| Update {
+        let mut confiscate_collateral_and_debt_updates: Vec<Update> =
+            confiscate_collateral_and_debt_events
+                .into_iter()
+                .map(|(x, meta)| {
+                    Update::PositionUpdate(GenericUpdate::<PositionUpdate> {
                         update_id: compute_position_id(x.vault, x.token_id, x.user),
                         block_number: meta.block_number,
                         transaction_index: meta.transaction_index,
@@ -262,30 +256,41 @@ impl<M: Middleware> PositionsWatcher<M> {
                             user: x.user,
                             delta_collateral: x.delta_collateral,
                             delta_normal_debt: x.delta_normal_debt,
-                        }
+                        },
                     })
-                    .collect();
+                })
+                .collect();
 
-        let mut all_updates: Vec<Update<UpdateTypes>> = Vec::new();
+        let mut all_updates: Vec<Update> = Vec::new();
         all_updates.append(&mut modify_collateral_and_debt_updates);
         all_updates.append(&mut transfer_collateral_and_debt_updates);
         all_updates.append(&mut confiscate_collateral_and_debt_updates);
         all_updates.sort();
-        all_updates.into_iter().for_each(|position_update| {
-            debug!(
-                "{}, {}",
-                position_update.block_number, position_update.transaction_index
-            );
+        all_updates
+            .into_iter()
+            .for_each(|position_update| match position_update {
+                Update::PositionUpdate(update) => {
+                    debug!(
+                        "Position Update: Block: {}, TxIndex: {}",
+                        update.block_number, update.transaction_index
+                    );
 
-            let _ = self.update_position(
-                position_update.position_id,
-                position_update.vault_id,
-                position_update.token_id,
-                position_update.user,
-                position_update.delta_collateral,
-                position_update.delta_normal_debt,
-            );
-        });
+                    let _ = self.update_position(
+                        update.data.position_id,
+                        update.data.vault_id,
+                        update.data.token_id,
+                        update.data.user,
+                        update.data.delta_collateral,
+                        update.data.delta_normal_debt,
+                    );
+                }
+                Update::RateUpdate(update) => {
+                    debug!(
+                        "Rate Update: Block: {}, TxIndex: {}",
+                        update.block_number, update.transaction_index
+                    );
+                }
+            });
 
         Ok(())
     }
