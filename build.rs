@@ -5,6 +5,7 @@ fn main() {
     // Only re-run the builder script if the contract changes
     println!("cargo:rerun-if-changed=./abis/*.json");
     bindgen("Codex").unwrap();
+    bindgen("Collybus").unwrap();
     bindgen("IMulticall2").unwrap();
 }
 

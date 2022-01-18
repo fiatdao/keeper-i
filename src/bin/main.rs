@@ -71,6 +71,8 @@ struct Opts {
 struct Config {
     #[serde(rename = "Codex")]
     codex: Address,
+    #[serde(rename = "Collybus")]
+    collybus: Address,
     #[serde(rename = "Multicall2")]
     multicall2: Address,
 }
@@ -140,6 +142,7 @@ async fn run<P: JsonRpcClient + 'static>(opts: Opts, provider: Provider<P>) -> a
 
     let cfg: Config = serde_json::from_reader(std::fs::File::open(opts.config)?)?;
     info!("Codex: {:?}", cfg.codex);
+    info!("Collybus: {:?}", cfg.collybus);
     info!("Multicall2: {:?}", cfg.multicall2);
     info!("Persistent data will be stored at: {:?}", opts.file);
 
@@ -159,6 +162,7 @@ async fn run<P: JsonRpcClient + 'static>(opts: Opts, provider: Provider<P>) -> a
     let mut keeper = Keeper::new(
         client,
         cfg.codex,
+        cfg.collybus,
         cfg.multicall2,
         opts.multicall_batch_size,
         opts.min_ratio,
@@ -166,7 +170,7 @@ async fn run<P: JsonRpcClient + 'static>(opts: Opts, provider: Provider<P>) -> a
         gas_escalator,
         opts.bump_gas_delay,
         state,
-        format!("{}.codex={:?}", opts.instance_name, cfg.codex),
+        format!("{}.codex={:?}.collybus={:?}", opts.instance_name, cfg.codex, cfg.collybus),
     )
     .await?;
 

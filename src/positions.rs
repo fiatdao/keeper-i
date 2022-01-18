@@ -3,10 +3,12 @@
 //! This module is responsible for keeping track of open positions and observing their debt healthiness.
 use crate::{
     bindings::Codex,
+    bindings::Collybus,
     // bindings::IMulticall2, bindings::IMulticall2Call,
     bindings::PositionIdType,
     bindings::TokenIdType,
     bindings::VaultIdType,
+    bindings::TokenType,
     Result,
 };
 use core::cmp::Ordering;
@@ -22,14 +24,6 @@ use tracing::{
     instrument, // info, trace, warn
 };
 
-fn compute_position_id(vault: H160, token_id: U256, user: H160) -> PositionIdType {
-    ethers::utils::keccak256(ethers::abi::encode(&[
-        ethers::abi::Token::Address(vault.clone()),
-        ethers::abi::Token::Uint(token_id.into()),
-        ethers::abi::Token::Address(user.clone()),
-    ]))
-}
-
 pub type UpdateIdType = [u8; 32];
 
 pub type PositionMap = HashMap<PositionIdType, Position>;
@@ -38,6 +32,7 @@ pub type PositionMap = HashMap<PositionIdType, Position>;
 pub struct PositionsWatcher<M> {
     // pub liquidator: Witch<M>,
     pub codex: Codex<M>,
+    pub collybus: Collybus<M>,
 
     /// Mapping of the addresses that have taken loans from the system and might
     /// be susceptible to liquidations
@@ -111,13 +106,56 @@ pub struct RateUpdate {
     pub block_number: U64,
     pub transaction_index: U64,
     pub rate_id: PositionIdType,
-    pub value: U256,
+    pub rate: U256,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SpotUpdate {
+    pub block_number: U64,
+    pub transaction_index: U64,
+    pub token: TokenType,
+    pub spot: U256,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Update {
     PositionUpdate(GenericUpdate<PositionUpdate>),
     RateUpdate(GenericUpdate<RateUpdate>),
+    SpotUpdate(GenericUpdate<SpotUpdate>),
+}
+
+pub fn compute_update_id(
+    block_number: U64,
+    transaction_index: U64,
+    content_hash: [u8; 32],
+) -> UpdateIdType {
+    ethers::utils::keccak256(ethers::abi::encode(&[
+        ethers::abi::Token::Uint(block_number.as_u64().into()),
+        ethers::abi::Token::Uint(transaction_index.as_u64().into()),
+        ethers::abi::Token::FixedBytes(content_hash.into()),
+    ]))
+}
+
+fn compute_position_update_id(vault: H160, token_id: U256, user: H160) -> PositionIdType {
+    ethers::utils::keccak256(ethers::abi::encode(&[
+        ethers::abi::Token::Address(vault.clone()),
+        ethers::abi::Token::Uint(token_id.into()),
+        ethers::abi::Token::Address(user.clone()),
+    ]))
+}
+
+fn compute_rate_update_id(rate_id: U256, rate: U256) -> PositionIdType {
+    ethers::utils::keccak256(ethers::abi::encode(&[
+        ethers::abi::Token::Uint(rate_id.into()),
+        ethers::abi::Token::Uint(rate.into()),
+    ]))
+}
+
+fn compute_spot_update_id(token: H160, spot: U256) -> PositionIdType {
+    ethers::utils::keccak256(ethers::abi::encode(&[
+        ethers::abi::Token::Address(token.clone()),
+        ethers::abi::Token::Uint(spot.into()),
+    ]))
 }
 
 impl<M: Middleware> PositionsWatcher<M> {
@@ -125,6 +163,7 @@ impl<M: Middleware> PositionsWatcher<M> {
     pub async fn new(
         // liquidator: Address,
         codex_: Address,
+        collybus_: Address,
         _multicall2: Address,
         _multicall_batch_size: usize,
         client: Arc<M>,
@@ -135,7 +174,8 @@ impl<M: Middleware> PositionsWatcher<M> {
         PositionsWatcher {
             // cauldron: Cauldron::new(cauldron, client.clone()),
             // liquidator: Witch::new(liquidator, client),
-            codex: Codex::new(codex_, client),
+            codex: Codex::new(codex_, client.clone()),
+            collybus: Collybus::new(collybus_, client),
             positions,
             //     multicall2,
             //     multicall_batch_size,
@@ -151,6 +191,7 @@ impl<M: Middleware> PositionsWatcher<M> {
         let span = debug_span!("monitoring");
         let _enter = span.enter();
 
+        // Codex
         let modify_collateral_and_debt_query = self
             .codex
             .modify_collateral_and_debt_filter()
@@ -167,28 +208,50 @@ impl<M: Middleware> PositionsWatcher<M> {
             .from_block(from_block)
             .to_block(to_block);
 
+        // Collybus
+        let update_discount_rate_query = self
+            .collybus
+            .update_discount_rate_filter()
+            .from_block(from_block)
+            .to_block(to_block);
+        let update_spot_query = self
+            .collybus
+            .update_spot_filter()
+            .from_block(from_block)
+            .to_block(to_block);
+
+        // query events in parallel
         let (
             modify_collateral_and_debt_events,
             transfer_collateral_and_debt_events,
             confiscate_collateral_and_debt_events,
+            update_discount_rate_events,
+            update_spot_events,
         ) = try_join!(
             modify_collateral_and_debt_query.query_with_meta(),
             transfer_collateral_and_debt_query.query_with_meta(),
-            confiscate_collateral_and_debt_query.query_with_meta()
+            confiscate_collateral_and_debt_query.query_with_meta(),
+            update_discount_rate_query.query_with_meta(),
+            update_spot_query.query_with_meta(),
         )
         .unwrap();
 
+        // create queue of update events
         let mut modify_collateral_and_debt_updates: Vec<Update> = modify_collateral_and_debt_events
             .into_iter()
             .map(|(x, meta)| {
                 Update::PositionUpdate(GenericUpdate::<PositionUpdate> {
-                    update_id: compute_position_id(x.vault, x.token_id, x.user),
+                    update_id: compute_update_id(
+                        meta.block_number,
+                        meta.transaction_index,
+                        compute_position_update_id(x.vault, x.token_id, x.user),
+                    ),
                     block_number: meta.block_number,
                     transaction_index: meta.transaction_index,
                     data: PositionUpdate {
                         block_number: meta.block_number,
                         transaction_index: meta.transaction_index,
-                        position_id: compute_position_id(x.vault, x.token_id, x.user),
+                        position_id: compute_position_update_id(x.vault, x.token_id, x.user),
                         vault_id: x.vault.into(),
                         token_id: x.token_id.into(),
                         user: x.user,
@@ -198,20 +261,23 @@ impl<M: Middleware> PositionsWatcher<M> {
                 })
             })
             .collect();
-
         let mut transfer_collateral_and_debt_updates: Vec<Update> =
             transfer_collateral_and_debt_events
                 .into_iter()
                 .map(|(x, meta)| {
                     [
                         Update::PositionUpdate(GenericUpdate::<PositionUpdate> {
-                            update_id: compute_position_id(x.vault, x.token_id, x.src),
+                            update_id: compute_update_id(
+                                meta.block_number,
+                                meta.transaction_index,
+                                compute_position_update_id(x.vault, x.token_id, x.src),
+                            ),
                             block_number: meta.block_number,
                             transaction_index: meta.transaction_index,
                             data: PositionUpdate {
                                 block_number: meta.block_number,
                                 transaction_index: meta.transaction_index,
-                                position_id: compute_position_id(x.vault, x.token_id, x.src),
+                                position_id: compute_position_update_id(x.vault, x.token_id, x.src),
                                 vault_id: x.vault.into(),
                                 token_id: x.token_id.into(),
                                 user: x.src,
@@ -220,13 +286,17 @@ impl<M: Middleware> PositionsWatcher<M> {
                             },
                         }),
                         Update::PositionUpdate(GenericUpdate::<PositionUpdate> {
-                            update_id: compute_position_id(x.vault, x.token_id, x.dst),
+                            update_id: compute_update_id(
+                                meta.block_number,
+                                meta.transaction_index,
+                                compute_position_update_id(x.vault, x.token_id, x.dst),
+                            ),
                             block_number: meta.block_number,
                             transaction_index: meta.transaction_index,
                             data: PositionUpdate {
                                 block_number: meta.block_number,
                                 transaction_index: meta.transaction_index,
-                                position_id: compute_position_id(x.vault, x.token_id, x.dst),
+                                position_id: compute_position_update_id(x.vault, x.token_id, x.dst),
                                 vault_id: x.vault.into(),
                                 token_id: x.token_id.into(),
                                 user: x.dst,
@@ -238,19 +308,22 @@ impl<M: Middleware> PositionsWatcher<M> {
                 })
                 .flatten()
                 .collect();
-
         let mut confiscate_collateral_and_debt_updates: Vec<Update> =
             confiscate_collateral_and_debt_events
                 .into_iter()
                 .map(|(x, meta)| {
                     Update::PositionUpdate(GenericUpdate::<PositionUpdate> {
-                        update_id: compute_position_id(x.vault, x.token_id, x.user),
+                        update_id: compute_update_id(
+                            meta.block_number,
+                            meta.transaction_index,
+                            compute_position_update_id(x.vault, x.token_id, x.user),
+                        ),
                         block_number: meta.block_number,
                         transaction_index: meta.transaction_index,
                         data: PositionUpdate {
                             block_number: meta.block_number,
                             transaction_index: meta.transaction_index,
-                            position_id: compute_position_id(x.vault, x.token_id, x.user),
+                            position_id: compute_position_update_id(x.vault, x.token_id, x.user),
                             vault_id: x.vault.into(),
                             token_id: x.token_id.into(),
                             user: x.user,
@@ -261,11 +334,59 @@ impl<M: Middleware> PositionsWatcher<M> {
                 })
                 .collect();
 
+        let mut update_discount_rate_updates: Vec<Update> = update_discount_rate_events
+            .into_iter()
+            .map(|(x, meta)| {
+                Update::RateUpdate(GenericUpdate::<RateUpdate> {
+                    update_id: compute_update_id(
+                        meta.block_number,
+                        meta.transaction_index,
+                        compute_rate_update_id(x.token_id, x.rate),
+                    ),
+                    block_number: meta.block_number,
+                    transaction_index: meta.transaction_index,
+                    data: RateUpdate {
+                        block_number: meta.block_number,
+                        transaction_index: meta.transaction_index,
+                        rate_id: x.token_id.into(),
+                        rate: x.rate,
+                    },
+                })
+            })
+            .collect();
+        let mut update_spot_updates: Vec<Update> = update_spot_events
+            .into_iter()
+            .map(|(x, meta)| {
+                Update::SpotUpdate(GenericUpdate::<SpotUpdate> {
+                    update_id: compute_update_id(
+                        meta.block_number,
+                        meta.transaction_index,
+                        compute_spot_update_id(x.token, x.spot),
+                    ),
+                    block_number: meta.block_number,
+                    transaction_index: meta.transaction_index,
+                    data: SpotUpdate {
+                        block_number: meta.block_number,
+                        transaction_index: meta.transaction_index,
+                        token: x.token.into(),
+                        spot: x.spot,
+                    },
+                })
+            })
+            .collect();
+
+        // consolidate all update events
         let mut all_updates: Vec<Update> = Vec::new();
         all_updates.append(&mut modify_collateral_and_debt_updates);
         all_updates.append(&mut transfer_collateral_and_debt_updates);
         all_updates.append(&mut confiscate_collateral_and_debt_updates);
+        all_updates.append(&mut update_discount_rate_updates);
+        all_updates.append(&mut update_spot_updates);
+        
+        // sort them by 1. block_number, 2. transaction_index
         all_updates.sort();
+        
+        // process update events
         all_updates
             .into_iter()
             .for_each(|position_update| match position_update {
@@ -287,6 +408,12 @@ impl<M: Middleware> PositionsWatcher<M> {
                 Update::RateUpdate(update) => {
                     debug!(
                         "Rate Update: Block: {}, TxIndex: {}",
+                        update.block_number, update.transaction_index
+                    );
+                }
+                Update::SpotUpdate(update) => {
+                    debug!(
+                        "Spot Update: Block: {}, TxIndex: {}",
                         update.block_number, update.transaction_index
                     );
                 }

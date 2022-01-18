@@ -45,6 +45,7 @@ impl<M: Middleware> Keeper<M> {
     pub async fn new(
         client: Arc<M>,
         codex_: Address,
+        collybus_: Address,
         multicall2: Address,
         multicall_batch_size: usize,
         _min_ratio: u16,
@@ -64,6 +65,7 @@ impl<M: Middleware> Keeper<M> {
         };
         let positions_watcher = PositionsWatcher::new(
             codex_,
+            collybus_,
             multicall2,
             multicall_batch_size,
             client.clone(),

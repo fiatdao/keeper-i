@@ -10,6 +10,9 @@
 mod codex;
 pub use codex::*;
 
+mod collybus;
+pub use collybus::*;
+
 mod imulticall2;
 pub use imulticall2::CallData as IMulticall2Call;
 pub use imulticall2::ResultData as IMulticall2Result;
@@ -21,4 +24,6 @@ pub type PositionIdType = [u8; 32];
 pub type VaultIdType = [u8; 20];
 // TokenId
 pub type TokenIdType = [u8; 32];
+// TokenAdrr
+pub type TokenType = [u8; 20];
 // pub type BaseIdType = [u8; 6];
