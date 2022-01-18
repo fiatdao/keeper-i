@@ -4,6 +4,9 @@ pub use codex::*;
 mod collybus;
 pub use collybus::*;
 
+mod vaultept;
+pub use vaultept::*;
+
 mod imulticall2;
 pub use imulticall2::CallData as IMulticall2Call;
 pub use imulticall2::ResultData as IMulticall2Result;

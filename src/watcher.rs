@@ -11,6 +11,7 @@ use crate::{
     bindings::TokenIdType,
     // bindings::TokenType,
     bindings::UpdateIdType,
+    bindings::VaultEPT,
     bindings::VaultIdType,
     Result,
 };
@@ -26,17 +27,26 @@ use tracing::{
     instrument, // info, trace, warn
 };
 
+/// Map of vaults
+pub type VaultMap = HashMap<VaultIdType, Vault>;
+/// Map of positions
 pub type PositionMap = HashMap<PositionIdType, Position>;
-
+/// Map of discount rates
 pub type RateMap = HashMap<RateIdType, Rate>;
-
+/// Map of underlier spot prices
 pub type SpotMap = HashMap<SpotIdType, Spot>;
 
 #[derive(Clone)]
 pub struct Watcher<M> {
     // pub liquidator: Witch<M>,
+    /// Codex contract
     pub codex: Codex<M>,
+    /// Collybus contract
     pub collybus: Collybus<M>,
+    /// Collybus contract
+    pub vault: VaultEPT<M>,
+    /// Mapping of vault address
+    pub vaults: VaultMap,
     /// Mapping of the addresses that have taken loans from the system and might be susceptible to liquidations
     pub positions: PositionMap,
     /// Mapping of the of discount rates used to determine the value of a positions collateral
@@ -49,6 +59,14 @@ pub struct Watcher<M> {
     // multicall_batch_size: usize,
 
     // instance_name: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// A position's details
+pub struct Vault {
+    pub vault_id: VaultIdType,
+    pub token: H160,
+    pub underlier: H160,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -187,6 +205,7 @@ impl<M: Middleware> Watcher<M> {
         _multicall2: Address,
         _multicall_batch_size: usize,
         client: Arc<M>,
+        vaults: HashMap<VaultIdType, Vault>,
         positions: HashMap<PositionIdType, Position>,
         rates: HashMap<RateIdType, Rate>,
         spots: HashMap<SpotIdType, Spot>,
@@ -195,8 +214,10 @@ impl<M: Middleware> Watcher<M> {
         // let multicall2 = IMulticall2::new(multicall2, client.clone());
         Watcher {
             codex: Codex::new(codex_, client.clone()),
-            collybus: Collybus::new(collybus_, client),
+            collybus: Collybus::new(collybus_, client.clone()),
+            vault: VaultEPT::new(Address::zero(), client),
             // liquidator: Witch::new(liquidator, client),
+            vaults,
             positions,
             rates,
             spots,
@@ -400,25 +421,56 @@ impl<M: Middleware> Watcher<M> {
 
         // consolidate all update events
         let mut all_updates: Vec<Update> = Vec::new();
+        all_updates.append(&mut update_spot_updates);
         all_updates.append(&mut modify_collateral_and_debt_updates);
         all_updates.append(&mut transfer_collateral_and_debt_updates);
         all_updates.append(&mut confiscate_collateral_and_debt_updates);
         all_updates.append(&mut update_discount_rate_updates);
-        all_updates.append(&mut update_spot_updates);
 
         // sort them by 1. block_number, 2. transaction_index
+        for update in all_updates.iter() {
+            match update {
+                Update::PositionUpdate(update) => {
+                    println!("Block Number: {}", update.block_number);
+                }
+                Update::RateUpdate(update) => {
+                    println!("Block Number: {}", update.block_number);
+                }
+                Update::SpotUpdate(update) => {
+                    println!("Block Number: {}", update.block_number);
+                }
+            }
+        }
+
         all_updates.sort();
 
-        // process update events
-        all_updates
-            .into_iter()
-            .for_each(|position_update| match position_update {
-                Update::PositionUpdate(update) => {
-                    debug!(
-                        "Position Update: Block: {}, TxIndex: {}",
-                        update.block_number, update.transaction_index
-                    );
+        println!("");
 
+        for update in all_updates.iter() {
+            match update {
+                Update::PositionUpdate(update) => {
+                    println!("Block Number: {}", update.block_number);
+                }
+                Update::RateUpdate(update) => {
+                    println!("Block Number: {}", update.block_number);
+                }
+                Update::SpotUpdate(update) => {
+                    println!("Block Number: {}", update.block_number);
+                }
+            }
+        }
+
+
+        // process update events
+        for update in all_updates.iter() {
+            match update {
+                Update::PositionUpdate(update) => {
+                    // debug!(
+                    //     "Position Update: Block: {}, TxIndex: {}",
+                    //     update.block_number, update.transaction_index
+                    // );
+
+                    let _ = self.update_vault(update.data.vault_id).await;
                     let _ = self.update_collateral_and_debt(
                         update.data.position_id,
                         update.data.vault_id,
@@ -429,23 +481,46 @@ impl<M: Middleware> Watcher<M> {
                     );
                 }
                 Update::RateUpdate(update) => {
-                    debug!(
-                        "Rate Update: Block: {}, TxIndex: {}",
-                        update.block_number, update.transaction_index
-                    );
+                    // debug!(
+                    //     "Rate Update: Block: {}, TxIndex: {}",
+                    //     update.block_number, update.transaction_index
+                    // );
 
                     let _ = self.update_rate(update.data.rate_id, update.data.rate);
                 }
                 Update::SpotUpdate(update) => {
-                    debug!(
-                        "Spot Update: Block: {}, TxIndex: {}",
-                        update.block_number, update.transaction_index
-                    );
+                    // debug!(
+                    //     "Spot Update: Block: {}, TxIndex: {}",
+                    //     update.block_number, update.transaction_index
+                    // );
                     let _ = self.update_spot(update.data.spot_id, update.data.spot);
                 }
-            });
+            }
+        }
 
         Ok(())
+    }
+
+    pub async fn update_vault(&mut self, vault_id: VaultIdType) -> Result<&Vault, M> {
+        let exists = self.vaults.contains_key(&vault_id);
+        let vault = self.vaults.entry(vault_id).or_insert(Vault {
+            vault_id: vault_id,
+            token: vault_id.into(),
+            underlier: VaultEPT::new(vault_id.clone(), self.vault.client().into())
+                .token()
+                .call()
+                .await
+                .unwrap(),
+        });
+
+        // if !exists {
+        //     debug!(
+        //         "New Vault added: {:?}, Token: {:?}, Underlier: {:?}",
+        //         vault_id, vault.token, vault.underlier
+        //     );
+        // }
+
+        Ok(vault)
     }
 
     pub fn update_collateral_and_debt(
@@ -484,11 +559,7 @@ impl<M: Middleware> Watcher<M> {
         Ok(position)
     }
 
-    pub fn update_rate(
-        &mut self,
-        rate_id: RateIdType,
-        value: U256,
-    ) -> Result<&Rate, M> {
+    pub fn update_rate(&mut self, rate_id: RateIdType, value: U256) -> Result<&Rate, M> {
         let rate = self.rates.entry(rate_id).or_insert(Rate {
             rate_id: rate_id,
             rate: U256::zero(),
@@ -504,11 +575,7 @@ impl<M: Middleware> Watcher<M> {
         Ok(rate)
     }
 
-    pub fn update_spot(
-        &mut self,
-        spot_id: SpotIdType,
-        value: U256,
-    ) -> Result<&Spot, M> {
+    pub fn update_spot(&mut self, spot_id: SpotIdType, value: U256) -> Result<&Spot, M> {
         let spot = self.spots.entry(spot_id).or_insert(Spot {
             spot_id: spot_id,
             spot: U256::zero(),

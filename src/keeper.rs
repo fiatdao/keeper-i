@@ -1,6 +1,6 @@
 use crate::{
     escalator::GeometricGasPrice,
-    watcher::{PositionMap, RateMap, SpotMap, Watcher},
+    watcher::{VaultMap, PositionMap, RateMap, SpotMap, Watcher},
     // liquidations::{AuctionMap, Liquidator},
     Result,
 };
@@ -18,6 +18,9 @@ use tracing::{debug_span, info, instrument, trace};
 #[derive(Serialize, Deserialize, Default)]
 /// The state which is stored in our logs
 pub struct State {
+    /// The vaults being monitored
+    #[serde_as(as = "Vec<(_, _)>")]
+    vaults: VaultMap,
     /// The positions being monitored
     #[serde_as(as = "Vec<(_, _)>")]
     positions: PositionMap,
@@ -34,6 +37,7 @@ pub struct State {
     last_block: u64,
 }
 
+#[derive(Clone)]
 /// The keeper monitors the chain for both liquidation opportunities and for
 /// participation in auctions using Uniswap as a liquidity source
 pub struct Keeper<M> {
@@ -61,14 +65,21 @@ impl<M: Middleware> Keeper<M> {
         state: Option<State>,
         instance_name: String,
     ) -> Result<Keeper<M>, M> {
-        let (positions, rates, spots, last_block) = match state {
+        let (vaults, positions, rates, spots, last_block) = match state {
             Some(state) => (
+                state.vaults,
                 state.positions,
                 state.rates,
                 state.spots,
                 state.last_block.into(),
             ),
-            None => (HashMap::new(), HashMap::new(), HashMap::new(), 0.into()),
+            None => (
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                0.into(),
+            ),
         };
         let watcher = Watcher::new(
             codex_,
@@ -76,6 +87,7 @@ impl<M: Middleware> Keeper<M> {
             multicall2,
             multicall_batch_size,
             client.clone(),
+            vaults,
             positions,
             rates,
             spots,
@@ -269,6 +281,7 @@ impl<M: Middleware> Keeper<M> {
         serde_json::to_writer(
             w,
             &State {
+                vaults: self.watcher.vaults.clone(),
                 positions: self.watcher.positions.clone(),
                 rates: self.watcher.rates.clone(),
                 spots: self.watcher.spots.clone(),

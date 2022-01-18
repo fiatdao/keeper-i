@@ -6,6 +6,7 @@ fn main() {
     println!("cargo:rerun-if-changed=./abis/*.json");
     bindgen("Codex").unwrap();
     bindgen("Collybus").unwrap();
+    bindgen("VaultEPT").unwrap();
     bindgen("IMulticall2").unwrap();
 }
 
