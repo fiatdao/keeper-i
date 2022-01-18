@@ -6,16 +6,18 @@ use crate::{
     bindings::Collybus,
     // bindings::IMulticall2, bindings::IMulticall2Call,
     bindings::PositionIdType,
+    bindings::RateIdType,
+    bindings::SpotIdType,
     bindings::TokenIdType,
+    // bindings::TokenType,
+    bindings::UpdateIdType,
     bindings::VaultIdType,
-    bindings::TokenType,
     Result,
 };
 use core::cmp::Ordering;
 use ethers::prelude::*;
 use futures_util::try_join;
 
-// use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tracing::{
@@ -24,19 +26,23 @@ use tracing::{
     instrument, // info, trace, warn
 };
 
-pub type UpdateIdType = [u8; 32];
-
 pub type PositionMap = HashMap<PositionIdType, Position>;
 
+pub type RateMap = HashMap<RateIdType, Rate>;
+
+pub type SpotMap = HashMap<SpotIdType, Spot>;
+
 #[derive(Clone)]
-pub struct PositionsWatcher<M> {
+pub struct Watcher<M> {
     // pub liquidator: Witch<M>,
     pub codex: Codex<M>,
     pub collybus: Collybus<M>,
-
-    /// Mapping of the addresses that have taken loans from the system and might
-    /// be susceptible to liquidations
+    /// Mapping of the addresses that have taken loans from the system and might be susceptible to liquidations
     pub positions: PositionMap,
+    /// Mapping of the of discount rates used to determine the value of a positions collateral
+    pub rates: RateMap,
+    /// Mapping of the of spot prices used to determine the value of a positions collateral
+    pub spots: SpotMap,
     // We use multicall to batch together calls and have reduced stress on
     // our RPC endpoint
     // multicall2: IMulticall2<M>,
@@ -55,6 +61,20 @@ pub struct Position {
     pub user: H160,
     pub collateral: U256,
     pub normal_debt: U256,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// A position's details
+pub struct Rate {
+    pub rate_id: RateIdType,
+    pub rate: U256,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// A position's details
+pub struct Spot {
+    pub spot_id: SpotIdType,
+    pub spot: U256,
 }
 
 #[derive(Debug, Eq)]
@@ -113,7 +133,7 @@ pub struct RateUpdate {
 pub struct SpotUpdate {
     pub block_number: U64,
     pub transaction_index: U64,
-    pub token: TokenType,
+    pub spot_id: SpotIdType,
     pub spot: U256,
 }
 
@@ -151,14 +171,14 @@ fn compute_rate_update_id(rate_id: U256, rate: U256) -> PositionIdType {
     ]))
 }
 
-fn compute_spot_update_id(token: H160, spot: U256) -> PositionIdType {
+fn compute_spot_update_id(spot_id: H160, spot: U256) -> PositionIdType {
     ethers::utils::keccak256(ethers::abi::encode(&[
-        ethers::abi::Token::Address(token.clone()),
+        ethers::abi::Token::Address(spot_id.clone()),
         ethers::abi::Token::Uint(spot.into()),
     ]))
 }
 
-impl<M: Middleware> PositionsWatcher<M> {
+impl<M: Middleware> Watcher<M> {
     /// Constructor
     pub async fn new(
         // liquidator: Address,
@@ -168,15 +188,18 @@ impl<M: Middleware> PositionsWatcher<M> {
         _multicall_batch_size: usize,
         client: Arc<M>,
         positions: HashMap<PositionIdType, Position>,
+        rates: HashMap<RateIdType, Rate>,
+        spots: HashMap<SpotIdType, Spot>,
         _instance_name: String,
     ) -> Self {
         // let multicall2 = IMulticall2::new(multicall2, client.clone());
-        PositionsWatcher {
-            // cauldron: Cauldron::new(cauldron, client.clone()),
-            // liquidator: Witch::new(liquidator, client),
+        Watcher {
             codex: Codex::new(codex_, client.clone()),
             collybus: Collybus::new(collybus_, client),
+            // liquidator: Witch::new(liquidator, client),
             positions,
+            rates,
+            spots,
             //     multicall2,
             //     multicall_batch_size,
             //     instance_name,
@@ -368,7 +391,7 @@ impl<M: Middleware> PositionsWatcher<M> {
                     data: SpotUpdate {
                         block_number: meta.block_number,
                         transaction_index: meta.transaction_index,
-                        token: x.token.into(),
+                        spot_id: x.token.into(),
                         spot: x.spot,
                     },
                 })
@@ -382,10 +405,10 @@ impl<M: Middleware> PositionsWatcher<M> {
         all_updates.append(&mut confiscate_collateral_and_debt_updates);
         all_updates.append(&mut update_discount_rate_updates);
         all_updates.append(&mut update_spot_updates);
-        
+
         // sort them by 1. block_number, 2. transaction_index
         all_updates.sort();
-        
+
         // process update events
         all_updates
             .into_iter()
@@ -396,7 +419,7 @@ impl<M: Middleware> PositionsWatcher<M> {
                         update.block_number, update.transaction_index
                     );
 
-                    let _ = self.update_position(
+                    let _ = self.update_collateral_and_debt(
                         update.data.position_id,
                         update.data.vault_id,
                         update.data.token_id,
@@ -410,19 +433,22 @@ impl<M: Middleware> PositionsWatcher<M> {
                         "Rate Update: Block: {}, TxIndex: {}",
                         update.block_number, update.transaction_index
                     );
+
+                    let _ = self.update_rate(update.data.rate_id, update.data.rate);
                 }
                 Update::SpotUpdate(update) => {
                     debug!(
                         "Spot Update: Block: {}, TxIndex: {}",
                         update.block_number, update.transaction_index
                     );
+                    let _ = self.update_spot(update.data.spot_id, update.data.spot);
                 }
             });
 
         Ok(())
     }
 
-    pub fn update_position(
+    pub fn update_collateral_and_debt(
         &mut self,
         position_id: PositionIdType,
         vault_id: VaultIdType,
@@ -456,5 +482,45 @@ impl<M: Middleware> PositionsWatcher<M> {
         // );
 
         Ok(position)
+    }
+
+    pub fn update_rate(
+        &mut self,
+        rate_id: RateIdType,
+        value: U256,
+    ) -> Result<&Rate, M> {
+        let rate = self.rates.entry(rate_id).or_insert(Rate {
+            rate_id: rate_id,
+            rate: U256::zero(),
+        });
+
+        rate.rate = value;
+
+        // info!(
+        //     "vault: {:?}, tokenId: {:?}, user: {:?}, collateral: {:?}, normalDebt: {:?}",
+        //     vault_id, token_id, position.user, position.collateral, position.normal_debt
+        // );
+
+        Ok(rate)
+    }
+
+    pub fn update_spot(
+        &mut self,
+        spot_id: SpotIdType,
+        value: U256,
+    ) -> Result<&Spot, M> {
+        let spot = self.spots.entry(spot_id).or_insert(Spot {
+            spot_id: spot_id,
+            spot: U256::zero(),
+        });
+
+        spot.spot = value;
+
+        // info!(
+        //     "vault: {:?}, tokenId: {:?}, user: {:?}, collateral: {:?}, normalDebt: {:?}",
+        //     vault_id, token_id, position.user, position.collateral, position.normal_debt
+        // );
+
+        Ok(spot)
     }
 }
