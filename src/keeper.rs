@@ -1,7 +1,7 @@
 use crate::{
     escalator::GeometricGasPrice,
-    watcher::{VaultMap, PositionMap, RateMap, SpotMap, Watcher},
-    // liquidations::{AuctionMap, Liquidator},
+    liquidator::{AuctionMap, Liquidator},
+    watcher::{PositionMap, RateMap, SpotMap, VaultMap, Watcher},
     Result,
 };
 
@@ -30,9 +30,9 @@ pub struct State {
     /// The spot prices being monitored
     #[serde_as(as = "Vec<(_, _)>")]
     spots: SpotMap,
-    // /// The auctions being monitored
-    // #[serde_as(as = "Vec<(_, _)>")]
-    // auctions: AuctionMap,
+    /// The auctions being monitored
+    #[serde_as(as = "Vec<(_, _)>")]
+    auctions: AuctionMap,
     /// The last observed block
     last_block: u64,
 }
@@ -45,7 +45,7 @@ pub struct Keeper<M> {
     last_block: U64,
 
     watcher: Watcher<M>,
-    // liquidator: Liquidator<M>,
+    liquidator: Liquidator<M>,
     instance_name: String,
 }
 
@@ -54,26 +54,30 @@ impl<M: Middleware> Keeper<M> {
     /// data which should be taken into account from a previous run
     pub async fn new(
         client: Arc<M>,
-        codex_: Address,
-        collybus_: Address,
+        codex: Address,
+        collateral_auction: Address,
+        collybus: Address,
+        limes: Address,
         multicall2: Address,
         multicall_batch_size: usize,
-        _min_ratio: u16,
-        _gas_boost: u16,
-        _gas_escalator: GeometricGasPrice,
-        _bump_gas_delay: u64,
+        min_ratio: u16,
+        gas_boost: u16,
+        gas_escalator: GeometricGasPrice,
+        bump_gas_delay: u64,
         state: Option<State>,
         instance_name: String,
     ) -> Result<Keeper<M>, M> {
-        let (vaults, positions, rates, spots, last_block) = match state {
+        let (vaults, positions, rates, spots, auctions, last_block) = match state {
             Some(state) => (
                 state.vaults,
                 state.positions,
                 state.rates,
                 state.spots,
+                state.auctions,
                 state.last_block.into(),
             ),
             None => (
+                HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
@@ -82,8 +86,9 @@ impl<M: Middleware> Keeper<M> {
             ),
         };
         let watcher = Watcher::new(
-            codex_,
-            collybus_,
+            codex,
+            collybus,
+            limes,
             multicall2,
             multicall_batch_size,
             client.clone(),
@@ -94,25 +99,25 @@ impl<M: Middleware> Keeper<M> {
             instance_name.clone(),
         )
         .await;
-        // let liquidator = Liquidator::new(
-        //     controller,
-        //     liquidations,
-        //     flashloan,
-        //     Some(multicall2),
-        //     min_ratio,
-        //     gas_boost,
-        //     client.clone(),
-        //     auctions,
-        //     gas_escalator,
-        //     bump_gas_delay,
-        //     instance_name.clone(),
-        // )
-        // .await;
+        let liquidator = Liquidator::new(
+            limes,
+            collateral_auction,
+            // flashloan,
+            Some(multicall2),
+            min_ratio,
+            gas_boost,
+            client.clone(),
+            auctions,
+            gas_escalator,
+            bump_gas_delay,
+            instance_name.clone(),
+        )
+        .await;
 
         Ok(Self {
             client,
             watcher,
-            // liquidator,
+            liquidator,
             last_block,
             instance_name: instance_name.clone(),
         })
@@ -251,24 +256,22 @@ impl<M: Middleware> Keeper<M> {
     #[instrument(skip(self), fields(self.instance_name))]
     async fn on_block(&mut self, block_number: U64) -> Result<(), M> {
         // Get the gas price - TODO: Replace with gas price oracle
-        // let gas_price = self
-        //     .client
-        //     .get_gas_price()
-        //     .await
-        //     .map_err(ContractError::MiddlewareError)?;
+        let gas_price = self
+            .client
+            .get_gas_price()
+            .await
+            .map_err(ContractError::MiddlewareError)?;
 
-        // // 1. Check if our transactions have been mined
-        // self.liquidator.remove_or_bump().await?;
+        // 1. Check if our transactions have been mined
+        self.liquidator.remove_or_bump().await?;
 
         // 2. update our dataset with the new block's data
-        self.watcher
-            .sync(self.last_block, block_number)
-            .await?;
+        self.watcher.sync(self.last_block, block_number).await?;
 
-        // // 3. trigger the auction for any undercollateralized borrowers
-        // self.liquidator
-        //     .start_auctions(self.borrowers.vaults.iter(), gas_price)
-        //     .await?;
+        // 3. trigger the auction for any undercollateralized borrowers
+        self.liquidator
+            .start_auctions(self.watcher.positions.iter(), gas_price)
+            .await?;
 
         // // 4. try buying the ones which are worth buying
         // self.liquidator
@@ -285,7 +288,7 @@ impl<M: Middleware> Keeper<M> {
                 positions: self.watcher.positions.clone(),
                 rates: self.watcher.rates.clone(),
                 spots: self.watcher.spots.clone(),
-                // auctions: self.liquidator.auctions.clone(),
+                auctions: self.liquidator.auctions.clone(),
                 last_block: self.last_block.as_u64(),
             },
         )

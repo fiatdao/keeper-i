@@ -1,8 +1,8 @@
 pub mod bindings;
 pub mod escalator;
 pub mod keeper;
+pub mod liquidator;
 pub mod watcher;
-// pub mod liquidations;
 
 use ethers::prelude::*;
 use std::collections::HashMap;

@@ -1,8 +1,14 @@
 mod codex;
 pub use codex::*;
 
+mod collateralauction;
+pub use collateralauction::*;
+
 mod collybus;
 pub use collybus::*;
+
+mod limes;
+pub use limes::*;
 
 mod vaultept;
 pub use vaultept::*;
@@ -25,6 +31,10 @@ pub type TokenIdType = [u8; 32];
 pub type RateIdType = [u8; 32];
 // Uniquely identifies a the spot price of a positions underlier used for computing the fair price it
 pub type SpotIdType = [u8; 20];
+// Uniquely identifies a liqudation
+pub type LiquidationIdType = [u8; 32];
+// Uniquely identifies a collateral auction
+pub type AuctionIdType = [u8; 32];
 
 /// Uniquely identifies a Update / Event used by the watcher to sort incoming events
 pub type UpdateIdType = [u8; 32];

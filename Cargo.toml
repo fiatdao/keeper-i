@@ -10,6 +10,7 @@ ethers = { git = "https://github.com/gakonst/ethers-rs", features=["ws", "openss
 ethers-core = { git = "https://github.com/gakonst/ethers-rs" }
 exitcode = "1.1.2"
 futures-util = "0.3.19"
+hex = "0.4.3"
 serde_json = "1.0.57"
 serde_with = "1.10.0"
 tokio = { version = "1.11.0", features = ["full"] }
