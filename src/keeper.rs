@@ -1,6 +1,6 @@
 use crate::{
     escalator::GeometricGasPrice,
-    positions::{PositionMap, PositionsWatcher},
+    watcher::{VaultMap, PositionMap, RateMap, SpotMap, Watcher},
     // liquidations::{AuctionMap, Liquidator},
     Result,
 };
@@ -18,23 +18,33 @@ use tracing::{debug_span, info, instrument, trace};
 #[derive(Serialize, Deserialize, Default)]
 /// The state which is stored in our logs
 pub struct State {
+    /// The vaults being monitored
+    #[serde_as(as = "Vec<(_, _)>")]
+    vaults: VaultMap,
+    /// The positions being monitored
+    #[serde_as(as = "Vec<(_, _)>")]
+    positions: PositionMap,
+    /// The rates being monitored
+    #[serde_as(as = "Vec<(_, _)>")]
+    rates: RateMap,
+    /// The spot prices being monitored
+    #[serde_as(as = "Vec<(_, _)>")]
+    spots: SpotMap,
     // /// The auctions being monitored
     // #[serde_as(as = "Vec<(_, _)>")]
     // auctions: AuctionMap,
-    // /// The borrowers being monitored
-    #[serde_as(as = "Vec<(_, _)>")]
-    positions: PositionMap,
     /// The last observed block
     last_block: u64,
 }
 
+#[derive(Clone)]
 /// The keeper monitors the chain for both liquidation opportunities and for
 /// participation in auctions using Uniswap as a liquidity source
 pub struct Keeper<M> {
     client: Arc<M>,
     last_block: U64,
 
-    positions_watcher: PositionsWatcher<M>,
+    watcher: Watcher<M>,
     // liquidator: Liquidator<M>,
     instance_name: String,
 }
@@ -45,6 +55,7 @@ impl<M: Middleware> Keeper<M> {
     pub async fn new(
         client: Arc<M>,
         codex_: Address,
+        collybus_: Address,
         multicall2: Address,
         multicall_batch_size: usize,
         _min_ratio: u16,
@@ -54,20 +65,32 @@ impl<M: Middleware> Keeper<M> {
         state: Option<State>,
         instance_name: String,
     ) -> Result<Keeper<M>, M> {
-        // let (vaults, auctions, last_block) = match state {
-        //     Some(state) => (state.vaults, state.auctions, state.last_block.into()),
-        //     None => (HashMap::new(), HashMap::new(), 0.into()),
-        // };
-        let (positions, last_block) = match state {
-            Some(state) => (state.positions, state.last_block.into()),
-            None => (HashMap::new(), 0.into()),
+        let (vaults, positions, rates, spots, last_block) = match state {
+            Some(state) => (
+                state.vaults,
+                state.positions,
+                state.rates,
+                state.spots,
+                state.last_block.into(),
+            ),
+            None => (
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                0.into(),
+            ),
         };
-        let positions_watcher = PositionsWatcher::new(
+        let watcher = Watcher::new(
             codex_,
+            collybus_,
             multicall2,
             multicall_batch_size,
             client.clone(),
+            vaults,
             positions,
+            rates,
+            spots,
             instance_name.clone(),
         )
         .await;
@@ -88,7 +111,7 @@ impl<M: Middleware> Keeper<M> {
 
         Ok(Self {
             client,
-            positions_watcher,
+            watcher,
             // liquidator,
             last_block,
             instance_name: instance_name.clone(),
@@ -101,8 +124,8 @@ impl<M: Middleware> Keeper<M> {
             self.last_block = start_block.into();
         }
 
-        let watcher = self.client.clone();
-        let mut filter_id = watcher
+        let client = self.client.clone();
+        let mut filter_id = client
             .new_filter(FilterKind::NewBlocks)
             .await
             .map_err(ContractError::MiddlewareError)?;
@@ -116,7 +139,7 @@ impl<M: Middleware> Keeper<M> {
         let _enter = span.enter();
         loop {
             sleep(Duration::from_secs(30)).await; // don't spin
-            match watcher
+            match client
                 .get_filter_changes::<_, ethers_core::types::H256>(filter_id)
                 .await
             {
@@ -205,7 +228,7 @@ impl<M: Middleware> Keeper<M> {
                             String::from("can't query filter"),
                         )));
                     }
-                    filter_id = watcher
+                    filter_id = client
                         .new_filter(FilterKind::NewBlocks)
                         .await
                         .map_err(ContractError::MiddlewareError)?;
@@ -238,8 +261,8 @@ impl<M: Middleware> Keeper<M> {
         // self.liquidator.remove_or_bump().await?;
 
         // 2. update our dataset with the new block's data
-        self.positions_watcher
-            .update_positions(self.last_block, block_number)
+        self.watcher
+            .sync(self.last_block, block_number)
             .await?;
 
         // // 3. trigger the auction for any undercollateralized borrowers
@@ -258,8 +281,11 @@ impl<M: Middleware> Keeper<M> {
         serde_json::to_writer(
             w,
             &State {
+                vaults: self.watcher.vaults.clone(),
+                positions: self.watcher.positions.clone(),
+                rates: self.watcher.rates.clone(),
+                spots: self.watcher.spots.clone(),
                 // auctions: self.liquidator.auctions.clone(),
-                positions: self.positions_watcher.positions.clone(),
                 last_block: self.last_block.as_u64(),
             },
         )
