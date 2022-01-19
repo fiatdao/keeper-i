@@ -262,7 +262,7 @@ impl<M: Middleware> Keeper<M> {
 
         // 2. update our dataset with the new block's data
         self.watcher
-            .update_positions(self.last_block, block_number)
+            .sync(self.last_block, block_number)
             .await?;
 
         // // 3. trigger the auction for any undercollateralized borrowers

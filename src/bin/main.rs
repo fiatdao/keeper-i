@@ -87,7 +87,7 @@ fn init_logger(use_json: bool) {
             .with_span_list(true)
             .init();
     } else {
-        sub_builder.init();
+        sub_builder.compact().init();
     }
 }
 
