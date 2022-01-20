@@ -3,9 +3,9 @@
 //! This module is responsible for triggering and participating in a Auction's
 //! dutch auction
 use crate::{
-    bindings::{CollateralAuction, Limes, PositionIdType},
+    bindings::{AuctionIdType, CollateralAuction, Limes, PositionIdType},
     escalator::GeometricGasPrice,
-    watcher::Position,
+    watcher::{Auction, Position},
     Result,
 };
 
@@ -16,14 +16,10 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, sync::Arc, time::Instant};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-pub type AuctionMap = HashMap<PositionIdType, bool>;
-
 #[derive(Clone)]
 pub struct Liquidator<M> {
     limes: Limes<M>,
     _collateral_auction: CollateralAuction<M>,
-    /// The currently active auctions
-    pub auctions: AuctionMap,
 
     /// We use multicall to batch together calls and have reduced stress on
     /// our RPC endpoint
@@ -45,18 +41,6 @@ pub struct Liquidator<M> {
 
 /// Tx / Hash/ Submitted at time
 type PendingTransaction = (TypedTransaction, TxHash, Instant);
-
-/// An initiated auction
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct Auction {
-    /// The start time of the auction
-    started: u32,
-    under_auction: bool,
-    /// The debt which can be repaid
-    debt: u128,
-
-    ratio_pct: u16,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum TxType {
@@ -83,7 +67,6 @@ impl<M: Middleware> Liquidator<M> {
         min_ratio: u16,
         gas_boost: u16,
         client: Arc<M>,
-        auctions: AuctionMap,
         gas_escalator: GeometricGasPrice,
         bump_gas_delay: u64,
         instance_name: String,
@@ -100,8 +83,6 @@ impl<M: Middleware> Liquidator<M> {
             _min_ratio: min_ratio,
             _gas_boost: gas_boost,
             // target_collateral_offer,
-            auctions,
-
             pending_liquidations: HashMap::new(),
             pending_auctions: HashMap::new(),
             gas_escalator,
@@ -226,14 +207,17 @@ impl<M: Middleware> Liquidator<M> {
     }
 
     pub fn is_collateralized(&self, _position_id: &PositionIdType, _position: &Position) -> bool {
+
+
         return true;
     }
 
     /// Triggers liquidations for any vulnerable positions which were fetched from the
     /// controller
-    #[instrument(skip(self, positions), fields(self.instance_name))]
+    #[instrument(skip(self, _auctions, positions), fields(self.instance_name))]
     pub async fn start_auctions(
         &mut self,
+        _auctions: impl Iterator<Item = (&AuctionIdType, &Auction)>,
         positions: impl Iterator<Item = (&PositionIdType, &Position)>,
         gas_price: U256,
     ) -> Result<(), M> {

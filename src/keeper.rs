@@ -1,7 +1,7 @@
 use crate::{
     escalator::GeometricGasPrice,
-    liquidator::{AuctionMap, Liquidator},
-    watcher::{PositionMap, RateMap, SpotMap, VaultMap, Watcher},
+    liquidator::Liquidator,
+    watcher::{AuctionMap, PositionMap, RateMap, SpotMap, VaultMap, Watcher},
     Result,
 };
 
@@ -87,11 +87,13 @@ impl<M: Middleware> Keeper<M> {
         };
         let watcher = Watcher::new(
             codex,
+            collateral_auction,
             collybus,
             limes,
             multicall2,
             multicall_batch_size,
             client.clone(),
+            auctions,
             vaults,
             positions,
             rates,
@@ -102,12 +104,10 @@ impl<M: Middleware> Keeper<M> {
         let liquidator = Liquidator::new(
             limes,
             collateral_auction,
-            // flashloan,
             Some(multicall2),
             min_ratio,
             gas_boost,
             client.clone(),
-            auctions,
             gas_escalator,
             bump_gas_delay,
             instance_name.clone(),
@@ -270,7 +270,11 @@ impl<M: Middleware> Keeper<M> {
 
         // 3. trigger the auction for any undercollateralized borrowers
         self.liquidator
-            .start_auctions(self.watcher.positions.iter(), gas_price)
+            .start_auctions(
+                self.watcher.auctions.iter(),
+                self.watcher.positions.iter(),
+                gas_price,
+            )
             .await?;
 
         // // 4. try buying the ones which are worth buying
@@ -288,7 +292,7 @@ impl<M: Middleware> Keeper<M> {
                 positions: self.watcher.positions.clone(),
                 rates: self.watcher.rates.clone(),
                 spots: self.watcher.spots.clone(),
-                auctions: self.liquidator.auctions.clone(),
+                auctions: self.watcher.auctions.clone(),
                 last_block: self.last_block.as_u64(),
             },
         )

@@ -4,6 +4,7 @@
 use crate::{
     bindings::AuctionIdType,
     bindings::Codex,
+    bindings::CollateralAuction,
     bindings::Collybus,
     // bindings::IMulticall2, bindings::IMulticall2Call,
     bindings::Limes,
@@ -38,19 +39,23 @@ pub type RateMap = HashMap<RateIdType, Rate>;
 /// Map of underlier spot prices
 pub type SpotMap = HashMap<SpotIdType, Spot>;
 // / Map of auctions
-// pub type AuctionMap = HashMap<AuctionIdType, Auction>;
+pub type AuctionMap = HashMap<AuctionIdType, Auction>;
 
 #[derive(Clone)]
 pub struct Watcher<M> {
     // pub liquidator: Witch<M>,
     /// Codex contract
     pub codex: Codex<M>,
+    /// CollateralAuction contract
+    pub collateral_auction: CollateralAuction<M>,
     /// Collybus contract
     pub collybus: Collybus<M>,
     /// Base Vault contract (to be instantiated when required)
     pub base_vault: VaultEPT<M>,
     /// Limes contract
     pub limes: Limes<M>,
+    /// Mapping of auction address
+    pub auctions: AuctionMap,
     /// Mapping of vault address
     pub vaults: VaultMap,
     /// Mapping of the addresses that have taken loans from the system and might be susceptible to liquidations
@@ -99,6 +104,18 @@ pub struct Rate {
 pub struct Spot {
     pub spot_id: SpotIdType,
     pub spot: U256,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// An auction's details
+pub struct Auction {
+    pub auction_id: AuctionIdType,
+    pub vault_id: VaultIdType,
+    pub token_id: TokenIdType,
+    pub user: H160,
+    pub start_price: U256,
+    pub debt: U256,
+    pub collateral_to_sell: U256,
 }
 
 #[derive(Debug, Eq)]
@@ -151,11 +168,23 @@ pub struct LiquidationUpdate {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct AuctionUpdate {
+    pub auction_id: AuctionIdType,
+    pub vault_id: VaultIdType,
+    pub token_id: TokenIdType,
+    pub user: H160,
+    pub start_price: U256,
+    pub debt: U256,
+    pub collateral_to_sell: U256,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum Update {
     PositionUpdate(GenericUpdate<PositionUpdate>),
     RateUpdate(GenericUpdate<RateUpdate>),
     SpotUpdate(GenericUpdate<SpotUpdate>),
     LiquidationUpdate(GenericUpdate<LiquidationUpdate>),
+    AuctionUpdate(GenericUpdate<AuctionUpdate>),
 }
 
 pub fn compute_update_id(
@@ -210,11 +239,13 @@ impl<M: Middleware> Watcher<M> {
     /// Constructor
     pub async fn new(
         codex: Address,
+        collateral_auction: Address,
         collybus: Address,
         limes: Address,
         _multicall2: Address,
         _multicall_batch_size: usize,
         client: Arc<M>,
+        auctions: HashMap<AuctionIdType, Auction>,
         vaults: HashMap<VaultIdType, Vault>,
         positions: HashMap<PositionIdType, Position>,
         rates: HashMap<RateIdType, Rate>,
@@ -224,9 +255,11 @@ impl<M: Middleware> Watcher<M> {
         // let multicall2 = IMulticall2::new(multicall2, client.clone());
         Watcher {
             codex: Codex::new(codex, client.clone()),
+            collateral_auction: CollateralAuction::new(collateral_auction, client.clone()),
             collybus: Collybus::new(collybus, client.clone()),
             base_vault: VaultEPT::new(Address::zero(), client.clone()),
             limes: Limes::new(limes, client.clone()),
+            auctions,
             vaults,
             positions,
             rates,
@@ -281,6 +314,28 @@ impl<M: Middleware> Watcher<M> {
             .from_block(from_block)
             .to_block(to_block);
 
+        // CollateralAuction
+        let start_auction_query = self
+            .collateral_auction
+            .start_auction_filter()
+            .from_block(from_block)
+            .to_block(to_block);
+        // let take_collateral_query = self
+        //     .collateral_auction
+        //     .take_collateral_filter()
+        //     .from_block(from_block)
+        //     .to_block(to_block);
+        let redo_auction_query = self
+            .collateral_auction
+            .redo_auction_filter()
+            .from_block(from_block)
+            .to_block(to_block);
+        let stop_auction_query = self
+            .collateral_auction
+            .stop_auction_filter()
+            .from_block(from_block)
+            .to_block(to_block);
+
         // query events in parallel
         let (
             modify_collateral_and_debt_events,
@@ -289,6 +344,10 @@ impl<M: Middleware> Watcher<M> {
             update_discount_rate_events,
             update_spot_events,
             liquidate_events,
+            start_auction_events,
+            // take_collateral_events,
+            redo_auction_events,
+            stop_auction_events,
         ) = try_join!(
             modify_collateral_and_debt_query.query_with_meta(),
             transfer_collateral_and_debt_query.query_with_meta(),
@@ -296,6 +355,10 @@ impl<M: Middleware> Watcher<M> {
             update_discount_rate_query.query_with_meta(),
             update_spot_query.query_with_meta(),
             liquidate_query.query_with_meta(),
+            start_auction_query.query_with_meta(),
+            // take_collateral_query.query_with_meta(),
+            redo_auction_query.query_with_meta(),
+            stop_auction_query.query_with_meta(),
         )
         .unwrap();
 
@@ -454,6 +517,76 @@ impl<M: Middleware> Watcher<M> {
             })
             .collect();
 
+        let mut start_auction_updates: Vec<Update> = start_auction_events
+            .into_iter()
+            .map(|(x, meta)| {
+                Update::AuctionUpdate(GenericUpdate::<AuctionUpdate> {
+                    update_id: compute_update_id(
+                        meta.block_number,
+                        meta.transaction_index,
+                        x.auction_id.into(),
+                    ),
+                    block_number: meta.block_number,
+                    transaction_index: meta.transaction_index,
+                    data: AuctionUpdate {
+                        auction_id: x.auction_id.into(),
+                        vault_id: x.vault.into(),
+                        token_id: x.token_id.into(),
+                        user: x.user.into(),
+                        start_price: x.start_price,
+                        debt: x.debt,
+                        collateral_to_sell: x.collateral_to_sell.into(),
+                    },
+                })
+            })
+            .collect();
+        let mut redo_auction_updates: Vec<Update> = redo_auction_events
+            .into_iter()
+            .map(|(x, meta)| {
+                Update::AuctionUpdate(GenericUpdate::<AuctionUpdate> {
+                    update_id: compute_update_id(
+                        meta.block_number,
+                        meta.transaction_index,
+                        x.auction_id.into(),
+                    ),
+                    block_number: meta.block_number,
+                    transaction_index: meta.transaction_index,
+                    data: AuctionUpdate {
+                        auction_id: x.auction_id.into(),
+                        vault_id: x.vault.into(),
+                        token_id: x.token_id.into(),
+                        user: x.user.into(),
+                        start_price: x.start_price,
+                        debt: x.debt,
+                        collateral_to_sell: x.collateral_to_sell.into(),
+                    },
+                })
+            })
+            .collect();
+        let mut stop_auction_updates: Vec<Update> = stop_auction_events
+            .into_iter()
+            .map(|(x, meta)| {
+                Update::AuctionUpdate(GenericUpdate::<AuctionUpdate> {
+                    update_id: compute_update_id(
+                        meta.block_number,
+                        meta.transaction_index,
+                        x.auction_id.into(),
+                    ),
+                    block_number: meta.block_number,
+                    transaction_index: meta.transaction_index,
+                    data: AuctionUpdate {
+                        auction_id: x.auction_id.into(),
+                        vault_id: Default::default(),
+                        token_id: Default::default(),
+                        user: Default::default(),
+                        start_price: Default::default(),
+                        debt: Default::default(),
+                        collateral_to_sell: Default::default(),
+                    },
+                })
+            })
+            .collect();
+
         // consolidate all update events
         let mut all_updates: Vec<Update> = Vec::new();
         all_updates.append(&mut modify_collateral_and_debt_updates);
@@ -462,6 +595,9 @@ impl<M: Middleware> Watcher<M> {
         all_updates.append(&mut update_discount_rate_updates);
         all_updates.append(&mut update_spot_updates);
         all_updates.append(&mut liquidate_updates);
+        all_updates.append(&mut start_auction_updates);
+        all_updates.append(&mut redo_auction_updates);
+        all_updates.append(&mut stop_auction_updates);
 
         // sort them by 1. block_number, 2. transaction_index
         all_updates.sort_by(|a, b| {
@@ -470,12 +606,14 @@ impl<M: Middleware> Watcher<M> {
                 Update::RateUpdate(a) => a.block_number,
                 Update::SpotUpdate(a) => a.block_number,
                 Update::LiquidationUpdate(a) => a.block_number,
+                Update::AuctionUpdate(a) => a.block_number,
             };
             let block_number_b = match b {
                 Update::PositionUpdate(b) => b.block_number,
                 Update::RateUpdate(b) => b.block_number,
                 Update::SpotUpdate(b) => b.block_number,
                 Update::LiquidationUpdate(b) => b.block_number,
+                Update::AuctionUpdate(b) => b.block_number,
             };
 
             if block_number_a == block_number_b {
@@ -484,12 +622,14 @@ impl<M: Middleware> Watcher<M> {
                     Update::RateUpdate(a) => a.transaction_index,
                     Update::SpotUpdate(a) => a.transaction_index,
                     Update::LiquidationUpdate(a) => a.transaction_index,
+                    Update::AuctionUpdate(a) => a.transaction_index,
                 };
                 let transaction_index_b = match b {
                     Update::PositionUpdate(b) => b.transaction_index,
                     Update::RateUpdate(b) => b.transaction_index,
                     Update::SpotUpdate(b) => b.transaction_index,
                     Update::LiquidationUpdate(b) => b.transaction_index,
+                    Update::AuctionUpdate(b) => b.transaction_index,
                 };
                 return transaction_index_a.cmp(&transaction_index_b);
             }
@@ -550,6 +690,21 @@ impl<M: Middleware> Watcher<M> {
                         update.data.normal_debt,
                         update.data.collateral_auction,
                         update.data.auction_id,
+                    );
+                }
+                Update::AuctionUpdate(update) => {
+                    debug!(
+                        "Auction Update: Block: {}, TxIndex: {}",
+                        update.block_number, update.transaction_index
+                    );
+                    let _ = self.update_auction(
+                        update.data.auction_id,
+                        update.data.vault_id,
+                        update.data.token_id,
+                        update.data.user,
+                        update.data.start_price,
+                        update.data.debt,
+                        update.data.collateral_to_sell,
                     );
                 }
             }
@@ -681,5 +836,37 @@ impl<M: Middleware> Watcher<M> {
         // );
 
         Ok(position)
+    }
+
+    pub fn update_auction(
+        &mut self,
+        auction_id: AuctionIdType,
+        vault_id: VaultIdType,
+        token_id: TokenIdType,
+        user: H160,
+        start_price: U256,
+        debt: U256,
+        collateral_to_sell: U256,
+    ) -> Result<&Auction, M> {
+        let auction = self.auctions.entry(auction_id).or_insert(Auction {
+            auction_id: auction_id,
+            vault_id: vault_id,
+            token_id: token_id,
+            user: user,
+            start_price: Default::default(),
+            debt: Default::default(),
+            collateral_to_sell: Default::default(),
+        });
+
+        auction.start_price = start_price;
+        auction.debt = debt;
+        auction.collateral_to_sell = collateral_to_sell;
+
+        // info!(
+        //     "vault: {:?}, tokenId: {:?}, user: {:?}, collateral: {:?}, normalDebt: {:?}",
+        //     vault_id, token_id, position.user, position.collateral, position.normal_debt
+        // );
+
+        Ok(auction)
     }
 }
