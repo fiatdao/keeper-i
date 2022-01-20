@@ -77,6 +77,7 @@ pub struct Vault {
     pub vault_id: VaultIdType,
     pub token: H160,
     pub underlier: H160,
+    pub liquidation_ratio: U256,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -723,6 +724,7 @@ impl<M: Middleware> Watcher<M> {
                 .call()
                 .await
                 .unwrap(),
+            liquidation_ratio: self.collybus.vaults(vault_id.into()).call().await.unwrap(),
         });
 
         if !exists {
@@ -790,7 +792,7 @@ impl<M: Middleware> Watcher<M> {
 
     pub fn update_spot(&mut self, spot_id: SpotIdType, value: U256) -> Result<&Spot, M> {
         let spot = self.spots.entry(spot_id).or_insert(Spot {
-            spot_id: spot_id,
+            spot_id,
             spot: U256::zero(),
         });
 

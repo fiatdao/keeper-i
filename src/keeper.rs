@@ -273,6 +273,9 @@ impl<M: Middleware> Keeper<M> {
             .start_auctions(
                 self.watcher.auctions.iter(),
                 self.watcher.positions.iter(),
+                &self.watcher.vaults,
+                &self.watcher.rates,
+                &self.watcher.spots,
                 gas_price,
             )
             .await?;
