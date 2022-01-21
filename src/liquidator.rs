@@ -275,7 +275,7 @@ impl<M: Middleware> Liquidator<M> {
             return true;
         }
 
-        return true;
+        return false;
     }
 
     /// Triggers liquidations for any vulnerable positions which were fetched from the
