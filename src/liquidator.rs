@@ -221,8 +221,12 @@ impl<M: Middleware> Liquidator<M> {
         rates: &RateMap,
         spots: &SpotMap,
     ) -> bool {
-        let discount_rate = (*rates).get(&position.token_id).unwrap().rate;
-        let underlier = (*vaults).get(&position.vault_id).unwrap().underlier;
+        let vault = (*vaults).get(&position.vault_id).unwrap();
+        let underlier = (*vault).underlier;
+        let discount_rate = match (*rates).get(&position.token_id) {
+            Some(rate) => rate.rate,
+            None => vault.default_rate_id,
+        };
         let spot = (*spots).get::<[u8; 20]>(&underlier.into()).unwrap().spot;
         let block_timestamp = U256::from(
             SystemTime::now()
@@ -231,7 +235,7 @@ impl<M: Middleware> Liquidator<M> {
                 .as_secs(),
         );
         let maturity = block_timestamp.clone();
-        let liquidation_ratio = (*vaults).get(&position.vault_id).unwrap().liquidation_ratio;
+        let liquidation_ratio = (*vault).liquidation_ratio;
 
         let mut price;
         if !discount_rate.is_zero() && maturity.gt(&block_timestamp) {

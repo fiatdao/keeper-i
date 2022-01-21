@@ -78,6 +78,7 @@ pub struct Vault {
     pub token: H160,
     pub underlier: H160,
     pub liquidation_ratio: U256,
+    pub default_rate_id: U256,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -648,11 +649,15 @@ impl<M: Middleware> Watcher<M> {
         for update in all_updates.iter() {
             match update {
                 Update::PositionUpdate(update) => {
-                    debug!(
-                        "Position Update: Block: {}, TxIndex: {}",
-                        update.block_number, update.transaction_index
-                    );
                     let _ = self.update_vault(update.data.vault_id).await;
+                    debug!(
+                        "Position Update: Block: {}, TxIndex: {}, Vault: {}, TokenId: {}, User: {}",
+                        update.block_number,
+                        update.transaction_index,
+                        H160::from(update.data.vault_id),
+                        U256::from(update.data.token_id),
+                        update.data.user
+                    );
                     let _ = self.update_collateral_and_debt(
                         update.data.position_id,
                         update.data.vault_id,
@@ -664,22 +669,32 @@ impl<M: Middleware> Watcher<M> {
                 }
                 Update::RateUpdate(update) => {
                     debug!(
-                        "Rate Update: Block: {}, TxIndex: {}",
-                        update.block_number, update.transaction_index
+                        "Rate Update: Block: {}, TxIndex: {}, RateId: {}, Rate: {}",
+                        update.block_number,
+                        update.transaction_index,
+                        U256::from(update.data.rate_id),
+                        U256::from(update.data.rate)
                     );
                     let _ = self.update_rate(update.data.rate_id, update.data.rate);
                 }
                 Update::SpotUpdate(update) => {
                     debug!(
-                        "Spot Update: Block: {}, TxIndex: {}",
-                        update.block_number, update.transaction_index
+                        "Spot Update: Block: {}, TxIndex: {}, SpotId: {}, Spot: {}",
+                        update.block_number,
+                        update.transaction_index,
+                        H160::from(update.data.spot_id),
+                        U256::from(update.data.spot)
                     );
                     let _ = self.update_spot(update.data.spot_id, update.data.spot);
                 }
                 Update::LiquidationUpdate(update) => {
                     debug!(
-                        "Liquidation Update: Block: {}, TxIndex: {}",
-                        update.block_number, update.transaction_index
+                        "Liquidation Update: Block: {}, TxIndex: {}, Vault: {}, TokenId: {}, User: {}",
+                        update.block_number,
+                        update.transaction_index,
+                        H160::from(update.data.vault_id),
+                        U256::from(update.data.token_id),
+                        update.data.user
                     );
                     let _ = self.update_liquidate(
                         update.data.liquidation_id,
@@ -695,8 +710,12 @@ impl<M: Middleware> Watcher<M> {
                 }
                 Update::AuctionUpdate(update) => {
                     debug!(
-                        "Auction Update: Block: {}, TxIndex: {}",
-                        update.block_number, update.transaction_index
+                        "Auction Update: Block: {}, TxIndex: {}, AuctionId: {}, Vault: {}, TokenId: {}, User: {}",
+                        update.block_number,
+                        update.transaction_index,
+                        U256::from(update.data.auction_id),
+                        H160::from(update.data.vault_id),
+                        U256::from(update.data.token_id), update.data.user
                     );
                     let _ = self.update_auction(
                         update.data.auction_id,
@@ -716,23 +735,39 @@ impl<M: Middleware> Watcher<M> {
 
     pub async fn update_vault(&mut self, vault_id: VaultIdType) -> Result<&Vault, M> {
         let exists = self.vaults.contains_key(&vault_id);
-        let vault = self.vaults.entry(vault_id).or_insert(Vault {
-            vault_id: vault_id,
-            token: vault_id.into(),
-            underlier: VaultEPT::new(vault_id.clone(), self.base_vault.client().into())
-                .token()
-                .call()
-                .await
-                .unwrap(),
-            liquidation_ratio: self.collybus.vaults(vault_id.into()).call().await.unwrap(),
-        });
 
-        if !exists {
-            debug!(
-                "New Vault added: {:?}, Token: {:?}, Underlier: {:?}",
-                vault_id, vault.token, vault.underlier
-            );
-        }
+        let vault = match exists {
+            true => self.vaults.get(&vault_id).unwrap(),
+            false => {
+                let underlier =
+                    match VaultEPT::new(vault_id.clone(), self.base_vault.client().into())
+                        .underlier_token()
+                        .call()
+                        .await
+                    {
+                        Ok(underlier_token) => underlier_token,
+                        _ => VaultEPT::new(vault_id.clone(), self.base_vault.client().into())
+                            .token()
+                            .call()
+                            .await
+                            .unwrap(),
+                    };
+                let v = self.vaults.entry(vault_id).or_insert(Vault {
+                    vault_id: vault_id,
+                    token: vault_id.into(),
+                    underlier,
+                    liquidation_ratio: self.collybus.vaults(vault_id.into()).call().await.unwrap(),
+                    default_rate_id: U256::zero(),
+                });
+                debug!(
+                    "Added Vault: {}, Token: {}, Underlier: {}",
+                    H160::from(vault_id),
+                    H160::from(v.token),
+                    H160::from(v.underlier)
+                );
+                v
+            }
+        };
 
         Ok(vault)
     }
@@ -766,11 +801,6 @@ impl<M: Middleware> Watcher<M> {
             (Sign::Negative, abs) => position.normal_debt -= abs,
         }
 
-        // info!(
-        //     "vault: {:?}, tokenId: {:?}, user: {:?}, collateral: {:?}, normalDebt: {:?}",
-        //     vault_id, token_id, position.user, position.collateral, position.normal_debt
-        // );
-
         Ok(position)
     }
 
@@ -782,11 +812,6 @@ impl<M: Middleware> Watcher<M> {
 
         rate.rate = value;
 
-        // info!(
-        //     "vault: {:?}, tokenId: {:?}, user: {:?}, collateral: {:?}, normalDebt: {:?}",
-        //     vault_id, token_id, position.user, position.collateral, position.normal_debt
-        // );
-
         Ok(rate)
     }
 
@@ -797,11 +822,6 @@ impl<M: Middleware> Watcher<M> {
         });
 
         spot.spot = value;
-
-        // info!(
-        //     "vault: {:?}, tokenId: {:?}, user: {:?}, collateral: {:?}, normalDebt: {:?}",
-        //     vault_id, token_id, position.user, position.collateral, position.normal_debt
-        // );
 
         Ok(spot)
     }
@@ -832,11 +852,6 @@ impl<M: Middleware> Watcher<M> {
         position.under_liquidation = true;
         position.auction_id = auction_id.clone();
 
-        // info!(
-        //     "vault: {:?}, tokenId: {:?}, user: {:?}, collateral: {:?}, normalDebt: {:?}",
-        //     vault_id, token_id, position.user, position.collateral, position.normal_debt
-        // );
-
         Ok(position)
     }
 
@@ -863,11 +878,6 @@ impl<M: Middleware> Watcher<M> {
         auction.start_price = start_price;
         auction.debt = debt;
         auction.collateral_to_sell = collateral_to_sell;
-
-        // info!(
-        //     "vault: {:?}, tokenId: {:?}, user: {:?}, collateral: {:?}, normalDebt: {:?}",
-        //     vault_id, token_id, position.user, position.collateral, position.normal_debt
-        // );
 
         Ok(auction)
     }
