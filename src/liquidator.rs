@@ -5,15 +5,21 @@
 use crate::{
     bindings::{AuctionIdType, CollateralAuction, Limes, PositionIdType},
     escalator::GeometricGasPrice,
-    watcher::{Auction, Position},
+    watcher::{Auction, Position, RateMap, SpotMap, VaultMap},
     Result,
 };
 
 use ethers_core::types::transaction::eip2718::TypedTransaction;
 
-use ethers::prelude::*;
+use ethers::{prelude::*, utils::parse_units, utils::WEI_IN_ETHER};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    fmt,
+    ops::Add,
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 #[derive(Clone)]
@@ -206,8 +212,68 @@ impl<M: Middleware> Liquidator<M> {
         Ok(())
     }
 
-    pub fn is_collateralized(&self, _position_id: &PositionIdType, _position: &Position) -> bool {
+    // #[instrument(skip(self, rates, spots), fields(self.instance_name))]
+    pub fn is_collateralized(
+        &self,
+        _position_id: &PositionIdType,
+        position: &Position,
+        vaults: &VaultMap,
+        rates: &RateMap,
+        spots: &SpotMap,
+    ) -> bool {
+        let vault = (*vaults).get(&position.vault_id).unwrap();
+        let underlier = (*vault).underlier;
+        let discount_rate = match (*rates).get(&position.token_id) {
+            Some(rate) => rate.rate,
+            None => vault.default_rate_id,
+        };
+        let spot = (*spots).get::<[u8; 20]>(&underlier.into()).unwrap().spot;
+        let block_timestamp = U256::from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
+        let maturity = block_timestamp.clone();
+        let liquidation_ratio = (*vault).liquidation_ratio;
 
+        let mut price;
+        if !discount_rate.is_zero() && maturity.gt(&block_timestamp) {
+            let base = discount_rate.add(WEI_IN_ETHER);
+            let max_base = WEI_IN_ETHER.add(parse_units(2, 10).unwrap());
+            if base.ge(&max_base) {
+                return false;
+            }
+            let rate = base.pow(maturity.add(&block_timestamp.checked_neg().unwrap()));
+            price = WEI_IN_ETHER
+                .checked_mul(WEI_IN_ETHER.into())
+                .unwrap()
+                .checked_div(rate)
+                .unwrap();
+        } else {
+            price = WEI_IN_ETHER;
+        }
+        price = price
+            .checked_mul(spot)
+            .unwrap()
+            .checked_div(WEI_IN_ETHER)
+            .unwrap();
+        price = price
+            .checked_mul(WEI_IN_ETHER)
+            .unwrap()
+            .checked_div(liquidation_ratio)
+            .unwrap();
+
+        if position
+            .collateral
+            .checked_mul(price)
+            .unwrap()
+            .checked_div(WEI_IN_ETHER)
+            .unwrap()
+            .ge(&position.normal_debt)
+        {
+            return true;
+        }
 
         return true;
     }
@@ -219,6 +285,9 @@ impl<M: Middleware> Liquidator<M> {
         &mut self,
         _auctions: impl Iterator<Item = (&AuctionIdType, &Auction)>,
         positions: impl Iterator<Item = (&PositionIdType, &Position)>,
+        vaults: &VaultMap,
+        rates: &RateMap,
+        spots: &SpotMap,
         gas_price: U256,
     ) -> Result<(), M> {
         debug!("checking for undercollateralized positions...");
@@ -236,7 +305,7 @@ impl<M: Middleware> Liquidator<M> {
                 continue;
             }
 
-            if !self.is_collateralized(position_id, position) {
+            if !self.is_collateralized(position_id, position, vaults, rates, spots) {
                 if position.under_liquidation {
                     debug!(position_id = ?hex::encode(position_id), details = ?position, "found position under auction, ignoring it");
                     continue;
