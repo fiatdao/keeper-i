@@ -3,7 +3,7 @@
 Liquidates undercollateralized positions.
 
 This service altruistically calls the `Limes.liquidate` function for any
-position that is underwater, trigerring an auction for that position.
+position that is underwater, triggering an auction for that position.
 
 ## CLI
 
@@ -19,13 +19,15 @@ Optional arguments:
                              path to your private key
   -i, --interval INTERVAL    polling interval (ms) (default: 1000)
   -f, --file FILE            the file to be used for persistence (default: data.json)
-  -m, --min-ratio MIN-RATIO  the minimum ratio (collateral/debt) to trigger liquidation, percents (default: 110)
   -s, --start-block START-BLOCK
                              the block to start watching from
 ```
 
 Your contracts' `--config` file should be in the following format where:
  * `Codex` is the address of the Codex
+ * `CollateralAuction` is the address of the CollateralAuction
+ * `Collybus` is the address of the Collybus
+ * `Limes` is the address of the Limes
  * `Multicall` is the address of the Multicall (https://github.com/makerdao/multicall)
 
 The `--private-key` _must not_ have a `0x` prefix. Set the `interval` to 15s for mainnet.
@@ -34,7 +36,7 @@ The `--private-key` _must not_ have a `0x` prefix. Set the `interval` to 15s for
 
 ```sh
 # development
-./debug.sh
+./dev.sh
 # release
 ./start.sh
 ```
@@ -45,5 +47,3 @@ On each block:
 1. Bumps the gas price of all of our pending transactions
 2. Updates our dataset of positions & liquidation auctions with the new block's data
 3. Trigger the auction for any undercollateralized positions
-
-Take this keeper service for a spin by [running it in a test environment](TESTNET.md).
