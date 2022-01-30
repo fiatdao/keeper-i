@@ -885,17 +885,13 @@ impl<M: Middleware> Watcher<M> {
                     maturities: HashMap::new(),
                 });
 
-                // Maturity for TokenId 0
-                v.maturities.insert(
-                    U256::zero().into(),
-                    vc.maturity(U256::zero()).call().await.unwrap(),
-                );
                 debug!(
                     vault=?H160::from(v.vault_id),
                     token=?H160::from(v.token),
                     underlier=?H160::from(v.underlier),
                     "Added Vault",
                 );
+
                 v
             }
         };
@@ -927,6 +923,12 @@ impl<M: Middleware> Watcher<M> {
             let maturity = vc.maturity(token_id.into()).call().await.unwrap();
             let vault = self.update_vault(vault_id).await.unwrap();
             vault.maturities.insert(token_id,maturity);
+            debug!(
+                vault=?H160::from(vault_id),
+                token_id=?U256::from(token_id),
+                maturity=?maturity,
+                "Updated maturity",
+            );
         }
 
         Ok(())
