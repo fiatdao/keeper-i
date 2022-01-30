@@ -150,7 +150,7 @@ impl<M: Middleware> Liquidator<M> {
                     "fail"
                 };
                 info!(tx_hash = ?tx_hash, gas_used = %receipt.gas_used.unwrap_or_default(), user = ?addr,
-                  status = status, tx_type, instance_name, "confirmed");
+                  status = status, tx_type, instance_name, "Confirmed");
             } else {
                 let time_since = now.duration_since(instant).as_secs();
                 if time_since > bump_gas_delay {
@@ -308,7 +308,7 @@ impl<M: Middleware> Liquidator<M> {
         spots: &SpotMap,
         gas_price: U256,
     ) -> Result<(), M> {
-        debug!("checking for undercollateralized positions...");
+        debug!("Checking for undercollateralized positions...");
 
         let now = Instant::now();
 
@@ -318,7 +318,7 @@ impl<M: Middleware> Liquidator<M> {
                 trace!(
                     tx_hash = ?pending_tx.1,
                     position_id = ?hex::encode(position_id),
-                    "liquidation not confirmed yet"
+                    "Liquidation not confirmed yet"
                 );
                 continue;
             }
@@ -333,7 +333,7 @@ impl<M: Middleware> Liquidator<M> {
                     normal_debt = ?position.normal_debt,
                     gas_price=?gas_price,
                     instance_name=self.instance_name.as_str(),
-                    "found an undercollateralized position. starting an auction",
+                    "Found an undercollateralized position. starting an auction",
                 );
 
                 // Send the tx and track it
@@ -398,7 +398,7 @@ impl<M: Middleware> Liquidator<M> {
                     vault=?H160::from(position.vault_id),
                     token_id=?U256::from(position.token_id),
                     user=?position.user,
-                    "position is collateralized"
+                    "Position is collateralized"
                 );
             }
         }

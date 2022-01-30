@@ -701,6 +701,7 @@ impl<M: Middleware> Watcher<M> {
                         continue;
                     }
                     let _ = self.update_vault(update.data.vault_id).await;
+                    let _ = self.update_maturity_for_token_id(update.data.vault_id, update.data.token_id).await;
                     debug!(
                         transaction_index=?update.transaction_index,
                         log_index=?update.log_index,
@@ -709,7 +710,7 @@ impl<M: Middleware> Watcher<M> {
                         user=?update.data.user,
                         delta_collateral=?update.data.delta_collateral,
                         delta_normal_debt=?update.data.delta_normal_debt,
-                        "Position Updated",
+                        "Position updated",
                     );
                     let _ = self.update_collateral_and_debt(
                         update.data.position_id,
@@ -731,7 +732,7 @@ impl<M: Middleware> Watcher<M> {
                         vault=?H160::from(update.data.vault_id),
                         token_id=?U256::from(update.data.token_id),
                         rate_id=?U256::from(update.data.rate_id),
-                        "RateId Updated",
+                        "RateId updated",
                     );
                     let _ = self.update_rate_id(
                         update.data.vault_id,
@@ -749,7 +750,7 @@ impl<M: Middleware> Watcher<M> {
                         log_index=?update.log_index,
                         rate_id=?U256::from(update.data.rate_id),
                         discount_rate=?U256::from(update.data.rate),
-                        "DiscountRate Updated",
+                        "DiscountRate updated",
                     );
                     let _ = self.update_discount_rate(update.data.rate_id, update.data.rate);
                     self.processed_updates.insert(update.update_id, true);
@@ -763,7 +764,7 @@ impl<M: Middleware> Watcher<M> {
                         log_index=?update.log_index,
                         spot_id=?H160::from(update.data.spot_id),
                         spot=?U256::from(update.data.spot),
-                        "Spot Updated",
+                        "Spot updated",
                     );
                     let _ = self.update_spot(update.data.spot_id, update.data.spot);
                     self.processed_updates.insert(update.update_id, true);
@@ -778,19 +779,19 @@ impl<M: Middleware> Watcher<M> {
                         vault=?H160::from(update.data.vault_id),
                         token_id=?U256::from(update.data.token_id),
                         user=?update.data.user,
-                        "Liquidation Updated",
+                        "Liquidation updated",
                     );
-                    let _ = self.update_liquidate(
-                        update.data.position_id,
-                        update.data.vault_id,
-                        update.data.token_id,
-                        update.data.user,
-                        update.data.due,
-                        update.data.collateral,
-                        update.data.normal_debt,
-                        update.data.collateral_auction,
-                        update.data.auction_id,
-                    );
+                    // let _ = self.update_liquidate(
+                    //     update.data.position_id,
+                    //     update.data.vault_id,
+                    //     update.data.token_id,
+                    //     update.data.user,
+                    //     update.data.due,
+                    //     update.data.collateral,
+                    //     update.data.normal_debt,
+                    //     update.data.collateral_auction,
+                    //     update.data.auction_id,
+                    // );
                     self.processed_updates.insert(update.update_id, true);
                 }
                 Update::AuctionUpdate(update) => {
@@ -804,7 +805,7 @@ impl<M: Middleware> Watcher<M> {
                         vault=?H160::from(update.data.vault_id),
                         token_id=?U256::from(update.data.token_id),
                         user=?update.data.user,
-                        "Auction Updated",
+                        "Auction updated",
                     );
                     let _ = self.update_auction(
                         update.data.auction_id,
@@ -826,7 +827,7 @@ impl<M: Middleware> Watcher<M> {
                         log_index=?update.log_index,
                         vault=?H160::from(update.data.vault_id),
                         delta_rate=?I256::from(update.data.delta_rate),
-                        "Rate Updated",
+                        "Rate updated",
                     );
                     let _ = self.update_rate(update.data.vault_id, update.data.delta_rate);
                     self.processed_updates.insert(update.update_id, true);
@@ -915,6 +916,22 @@ impl<M: Middleware> Watcher<M> {
         Ok(vault)
     }
 
+    pub async fn update_maturity_for_token_id(
+        &mut self,
+        vault_id: VaultIdType,
+        token_id: TokenIdType
+    ) -> Result<(), M> {
+        if !self.update_vault(vault_id).await.unwrap().maturities.contains_key(&token_id) {
+            let client = self.base_vault.client().clone();
+            let vc = IVault::new(vault_id.clone(), client.into());
+            let maturity = vc.maturity(token_id.into()).call().await.unwrap();
+            let vault = self.update_vault(vault_id).await.unwrap();
+            vault.maturities.insert(token_id,maturity);
+        }
+
+        Ok(())
+    }
+
     pub fn update_collateral_and_debt(
         &mut self,
         position_id: PositionIdType,
@@ -983,29 +1000,29 @@ impl<M: Middleware> Watcher<M> {
         Ok(spot)
     }
 
-    pub fn update_liquidate(
-        &mut self,
-        position_id: PositionIdType,
-        vault_id: VaultIdType,
-        token_id: TokenIdType,
-        user: H160,
-        _due: U256,
-        _collateral: U256,
-        _normal_debt: U256,
-        _collateral_auction: H160,
-        _auction_id: AuctionIdType,
-    ) -> Result<&Position, M> {
-        let position = self.positions.entry(position_id).or_insert(Position {
-            position_id,
-            vault_id,
-            token_id,
-            user,
-            collateral: U256::zero(),
-            normal_debt: U256::zero(),
-        });
+    // pub fn update_liquidate(
+    //     &mut self,
+    //     position_id: PositionIdType,
+    //     vault_id: VaultIdType,
+    //     token_id: TokenIdType,
+    //     user: H160,
+    //     _due: U256,
+    //     _collateral: U256,
+    //     _normal_debt: U256,
+    //     _collateral_auction: H160,
+    //     _auction_id: AuctionIdType,
+    // ) -> Result<&Position, M> {
+    //     let position = self.positions.entry(position_id).or_insert(Position {
+    //         position_id,
+    //         vault_id,
+    //         token_id,
+    //         user,
+    //         collateral: U256::zero(),
+    //         normal_debt: U256::zero(),
+    //     });
 
-        Ok(position)
-    }
+    //     Ok(position)
+    // }
 
     pub fn update_auction(
         &mut self,

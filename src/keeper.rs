@@ -170,7 +170,7 @@ impl<M: Middleware> Keeper<M> {
 
                     if let Some(last_block_number) = maybe_last_block_number {
                         if last_block_number == block_number.as_u64() {
-                            trace!(last_block_number, "skipping previously seen block");
+                            trace!(last_block_number, "Skipping previously seen block");
                             continue;
                         }
                     }
