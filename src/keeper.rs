@@ -1,7 +1,7 @@
 use crate::{
     escalator::GeometricGasPrice,
     liquidator::Liquidator,
-    watcher::{AuctionMap, PositionMap, RateMap, SpotMap, VaultMap, Watcher},
+    watcher::{AuctionMap, DiscountRateMap, PositionMap, SpotMap, VaultMap, ProcessedUpdateMap, Watcher},
     Result,
 };
 
@@ -26,13 +26,16 @@ pub struct State {
     positions: PositionMap,
     /// The rates being monitored
     #[serde_as(as = "Vec<(_, _)>")]
-    rates: RateMap,
+    rates: DiscountRateMap,
     /// The spot prices being monitored
     #[serde_as(as = "Vec<(_, _)>")]
     spots: SpotMap,
     /// The auctions being monitored
     #[serde_as(as = "Vec<(_, _)>")]
     auctions: AuctionMap,
+    /// Processed Updates (used for avoiding reorgs)
+    #[serde_as(as = "Vec<(_, _)>")]
+    processed_updates: ProcessedUpdateMap,
     /// The last observed block
     last_block: u64,
 }
@@ -60,23 +63,32 @@ impl<M: Middleware> Keeper<M> {
         limes: Address,
         multicall2: Address,
         multicall_batch_size: usize,
-        min_ratio: u16,
         gas_boost: u16,
         gas_escalator: GeometricGasPrice,
         bump_gas_delay: u64,
         state: Option<State>,
         instance_name: String,
     ) -> Result<Keeper<M>, M> {
-        let (vaults, positions, rates, spots, auctions, last_block) = match state {
+        let (
+            vaults,
+            positions,
+            rates,
+            spots,
+            auctions,
+            processed_updates,
+            last_block
+        ) = match state {
             Some(state) => (
                 state.vaults,
                 state.positions,
                 state.rates,
                 state.spots,
                 state.auctions,
+                state.processed_updates,
                 state.last_block.into(),
             ),
             None => (
+                HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
@@ -98,6 +110,7 @@ impl<M: Middleware> Keeper<M> {
             positions,
             rates,
             spots,
+            processed_updates,
             instance_name.clone(),
         )
         .await;
@@ -105,7 +118,6 @@ impl<M: Middleware> Keeper<M> {
             limes,
             collateral_auction,
             Some(multicall2),
-            min_ratio,
             gas_boost,
             client.clone(),
             gas_escalator,
@@ -279,11 +291,6 @@ impl<M: Middleware> Keeper<M> {
                 gas_price,
             )
             .await?;
-
-        // // 4. try buying the ones which are worth buying
-        // self.liquidator
-        //     .buy_opportunities(self.last_block, block_number, gas_price)
-        //     .await?;
         Ok(())
     }
 
@@ -296,6 +303,7 @@ impl<M: Middleware> Keeper<M> {
                 rates: self.watcher.rates.clone(),
                 spots: self.watcher.spots.clone(),
                 auctions: self.watcher.auctions.clone(),
+                processed_updates: self.watcher.processed_updates.clone(),
                 last_block: self.last_block.as_u64(),
             },
         )

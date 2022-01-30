@@ -8,7 +8,7 @@ fn main() {
     bindgen("CollateralAuction").unwrap();
     bindgen("Collybus").unwrap();
     bindgen("Limes").unwrap();
-    bindgen("VaultEPT").unwrap();
+    bindgen("IVault").unwrap();
     bindgen("IMulticall2").unwrap();
 }
 

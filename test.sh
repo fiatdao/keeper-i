@@ -19,6 +19,7 @@ RUST_BACKTRACE=1 RUST_LOG="main,keeper=debug" cargo run -- \
     --config ./addrs.json \
     --private-key ./private_key \
     --url wss://eth-goerli.alchemyapi.io/v2/$ALCHEMY_API_KEY \
+    --chain-id 5 \
     --interval 7000 \
     --start-block 6142980 \
     --file state.json \

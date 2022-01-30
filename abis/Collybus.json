@@ -5,93 +5,35 @@
     "type": "constructor"
   },
   {
-    "inputs": [],
-    "name": "Collybus__setParam_notLive",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Collybus__setParam_unrecognizedParam",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Collybus__updateDiscountRate_notLive",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Collybus__updateSpot_notLive",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Guarded__notGranted",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Guarded__notRoot",
-    "type": "error"
-  },
-  {
+    "anonymous": false,
     "inputs": [
       {
+        "indexed": true,
+        "internalType": "address",
+        "name": "vault",
+        "type": "address"
+      },
+      {
+        "indexed": true,
         "internalType": "uint256",
-        "name": "x",
+        "name": "tokenId",
         "type": "uint256"
       },
       {
-        "internalType": "uint256",
-        "name": "y",
-        "type": "uint256"
-      }
-    ],
-    "name": "Math__add_overflow",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "x",
-        "type": "uint256"
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "param",
+        "type": "bytes32"
       },
       {
+        "indexed": false,
         "internalType": "uint256",
-        "name": "y",
+        "name": "data",
         "type": "uint256"
       }
     ],
-    "name": "Math__mul_overflow",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "x",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "y",
-        "type": "uint256"
-      }
-    ],
-    "name": "Math__sub_overflow",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "prod1",
-        "type": "uint256"
-      }
-    ],
-    "name": "PRBMath__MulDivFixedPointOverflow",
-    "type": "error"
+    "name": "SetParam",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -142,33 +84,8 @@
     "inputs": [
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "vault",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "bytes32",
-        "name": "param",
-        "type": "bytes32"
-      },
-      {
-        "indexed": false,
         "internalType": "uint256",
-        "name": "data",
-        "type": "uint256"
-      }
-    ],
-    "name": "SetParam",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "tokenId",
+        "name": "rateId",
         "type": "uint256"
       },
       {
@@ -199,6 +116,19 @@
     ],
     "name": "UpdateSpot",
     "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "ANY_CALLER",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
     "inputs": [],
@@ -291,6 +221,30 @@
     "name": "lock",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "rateIds",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -390,6 +344,11 @@
         "type": "address"
       },
       {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
         "internalType": "bytes32",
         "name": "param",
         "type": "bytes32"
@@ -398,6 +357,29 @@
         "internalType": "uint256",
         "name": "data",
         "type": "uint256"
+      }
+    ],
+    "name": "setParam",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "vault",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "param",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint128",
+        "name": "data",
+        "type": "uint128"
       }
     ],
     "name": "setParam",
@@ -428,7 +410,7 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "tokenId",
+        "name": "rateId",
         "type": "uint256"
       },
       {
@@ -471,9 +453,14 @@
     "name": "vaults",
     "outputs": [
       {
-        "internalType": "uint256",
+        "internalType": "uint128",
         "name": "liquidationRatio",
-        "type": "uint256"
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "defaultRateId",
+        "type": "uint128"
       }
     ],
     "stateMutability": "view",

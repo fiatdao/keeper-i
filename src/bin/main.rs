@@ -37,12 +37,6 @@ struct Opts {
     file: PathBuf,
 
     #[options(
-        help = "the minimum ratio (collateral/debt) to trigger liquidation, percents",
-        default = "110"
-    )]
-    min_ratio: u16,
-
-    #[options(
         help = "extra gas to use for transactions, percent of estimated gas",
         default = "10"
     )]
@@ -173,7 +167,6 @@ async fn run<P: JsonRpcClient + 'static>(opts: Opts, provider: Provider<P>) -> a
         cfg.limes,
         cfg.multicall2,
         opts.multicall_batch_size,
-        opts.min_ratio,
         opts.gas_boost,
         gas_escalator,
         opts.bump_gas_delay,

@@ -10,8 +10,8 @@ pub use collybus::*;
 mod limes;
 pub use limes::*;
 
-mod vaultept;
-pub use vaultept::*;
+mod ivault;
+pub use ivault::*;
 
 mod imulticall2;
 pub use imulticall2::CallData as IMulticall2Call;
@@ -28,11 +28,9 @@ pub type TokenIdType = [u8; 32];
 // // Uniquely identifies a ERC20 style token (address of the token)
 // pub type TokenType = [u8; 20];
 // Uniquely identifies a discount rate used for computing the fair price of a positions collateral
-pub type RateIdType = [u8; 32];
+pub type DiscountRateIdType = [u8; 32];
 // Uniquely identifies a the spot price of a positions underlier used for computing the fair price it
 pub type SpotIdType = [u8; 20];
-// Uniquely identifies a liqudation
-pub type LiquidationIdType = [u8; 32];
 // Uniquely identifies a collateral auction
 pub type AuctionIdType = [u8; 32];
 

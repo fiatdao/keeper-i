@@ -5,18 +5,18 @@
 use crate::{
     bindings::{AuctionIdType, CollateralAuction, Limes, PositionIdType},
     escalator::GeometricGasPrice,
-    watcher::{Auction, Position, RateMap, SpotMap, VaultMap},
+    watcher::{Auction, DiscountRateMap, Position, SpotMap, VaultMap},
     Result,
 };
 
-use ethers_core::types::transaction::eip2718::TypedTransaction;
-
+use decimal_rs::Decimal;
 use ethers::{prelude::*, utils::parse_units, utils::WEI_IN_ETHER};
+use ethers_core::types::transaction::eip2718::TypedTransaction;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt,
-    ops::Add,
+    ops::{Add, Div, Mul},
     sync::Arc,
     time::{Instant, SystemTime},
 };
@@ -31,11 +31,8 @@ pub struct Liquidator<M> {
     /// our RPC endpoint
     _multicall: Multicall<M>,
 
-    /// The minimum ratio (collateral/debt) to trigger liquidation
-    _min_ratio: u16,
-
     // extra gas to use for txs, as percent of estimated gas cost
-    _gas_boost: u16,
+    gas_boost: u16,
 
     pending_liquidations: HashMap<PositionIdType, PendingTransaction>,
     pending_auctions: HashMap<PositionIdType, PendingTransaction>,
@@ -70,7 +67,6 @@ impl<M: Middleware> Liquidator<M> {
         limes: Address,
         collateral_auction: Address,
         multicall: Option<Address>,
-        min_ratio: u16,
         gas_boost: u16,
         client: Arc<M>,
         gas_escalator: GeometricGasPrice,
@@ -84,11 +80,8 @@ impl<M: Middleware> Liquidator<M> {
         Self {
             limes: Limes::new(limes, client.clone()),
             _collateral_auction: CollateralAuction::new(collateral_auction, client.clone()),
-            // flash_liquidator: FlashLiquidator::new(flashloan, client.clone()),
             _multicall: multicall,
-            _min_ratio: min_ratio,
-            _gas_boost: gas_boost,
-            // target_collateral_offer,
+            gas_boost: gas_boost,
             pending_liquidations: HashMap::new(),
             pending_auctions: HashMap::new(),
             gas_escalator,
@@ -212,13 +205,13 @@ impl<M: Middleware> Liquidator<M> {
         Ok(())
     }
 
-    // #[instrument(skip(self, rates, spots), fields(self.instance_name))]
+    #[instrument(skip(self, position_id, position, vaults, rates, spots), fields(self.instance_name))]
     pub fn is_collateralized(
         &self,
-        _position_id: &PositionIdType,
+        position_id: &PositionIdType,
         position: &Position,
         vaults: &VaultMap,
-        rates: &RateMap,
+        rates: &DiscountRateMap,
         spots: &SpotMap,
     ) -> bool {
         let vault = (*vaults).get(&position.vault_id).unwrap();
@@ -234,8 +227,8 @@ impl<M: Middleware> Liquidator<M> {
                 .unwrap()
                 .as_secs(),
         );
-        let maturity = block_timestamp.clone();
-        let liquidation_ratio = (*vault).liquidation_ratio;
+        let maturity = vault.maturities.get(&position.token_id).unwrap().clone();
+        let liquidation_ratio = vault.liquidation_ratio;
 
         let mut price;
         if !discount_rate.is_zero() && maturity.gt(&block_timestamp) {
@@ -244,7 +237,16 @@ impl<M: Middleware> Liquidator<M> {
             if base.ge(&max_base) {
                 return false;
             }
-            let rate = base.pow(maturity.add(&block_timestamp.checked_neg().unwrap()));
+            let left = maturity.checked_sub(block_timestamp).unwrap();
+            let rate = U256::from(
+                Decimal::from_parts(base.as_u128(), 18, false)
+                    .unwrap()
+                    .checked_pow(&Decimal::from_parts(left.as_u128(), 0, false).unwrap())
+                    .unwrap()
+                    .round(18)
+                    .into_parts()
+                    .0,
+            );
             price = WEI_IN_ETHER
                 .checked_mul(WEI_IN_ETHER.into())
                 .unwrap()
@@ -264,29 +266,45 @@ impl<M: Middleware> Liquidator<M> {
             .checked_div(liquidation_ratio)
             .unwrap();
 
-        if position
+        let collateral_value = position
             .collateral
             .checked_mul(price)
             .unwrap()
             .checked_div(WEI_IN_ETHER)
+            .unwrap();
+
+        let debt = position
+            .normal_debt
+            .checked_mul(vault.rate)
             .unwrap()
-            .ge(&position.normal_debt)
-        {
+            .checked_div(WEI_IN_ETHER)
+            .unwrap();
+
+        if collateral_value.ge(&debt) {
             return true;
         }
+
+        debug!(
+            position_id = ?hex::encode(position_id),
+            collateral_value = ?collateral_value,
+            debt_value = ?debt,
+            fair_price = ?price,
+            spot = ?spot,
+            discount_rate = ?discount_rate,
+        );
 
         return false;
     }
 
     /// Triggers liquidations for any vulnerable positions which were fetched from the
     /// controller
-    #[instrument(skip(self, _auctions, positions), fields(self.instance_name))]
+    #[instrument(skip(self, _auctions, positions, vaults, rates, spots, gas_price), fields(self.instance_name))]
     pub async fn start_auctions(
         &mut self,
         _auctions: impl Iterator<Item = (&AuctionIdType, &Auction)>,
         positions: impl Iterator<Item = (&PositionIdType, &Position)>,
         vaults: &VaultMap,
-        rates: &RateMap,
+        rates: &DiscountRateMap,
         spots: &SpotMap,
         gas_price: U256,
     ) -> Result<(), M> {
@@ -295,29 +313,32 @@ impl<M: Middleware> Liquidator<M> {
         let now = Instant::now();
 
         for (position_id, position) in positions {
-            //   if !position.is_initialized {
-            //       trace!(position_id = ?hex::encode(position_id), "Position is not initialized yet, skipping");
-            //       continue;
-            //   }
             // only iterate over positions that do not have pending liquidations
             if let Some(pending_tx) = self.pending_liquidations.get(position_id) {
-                trace!(tx_hash = ?pending_tx.1, position_id = ?hex::encode(position_id), "liquidation not confirmed yet");
+                trace!(
+                    tx_hash = ?pending_tx.1,
+                    position_id = ?hex::encode(position_id),
+                    "liquidation not confirmed yet"
+                );
                 continue;
             }
 
             if !self.is_collateralized(position_id, position, vaults, rates, spots) {
-                if position.under_liquidation {
-                    debug!(position_id = ?hex::encode(position_id), details = ?position, "found position under auction, ignoring it");
-                    continue;
-                }
                 info!(
-                    position_id = ?hex::encode(position_id), details = ?position, gas_price=?gas_price,
+                    position_id = ?hex::encode(position_id),
+                    vault = ?H160::from(position.vault_id),
+                    token_id = ?U256::from(position.token_id),
+                    user = ?position.user,
+                    collateral = ?position.collateral,
+                    normal_debt = ?position.normal_debt,
+                    gas_price=?gas_price,
                     instance_name=self.instance_name.as_str(),
                     "found an undercollateralized position. starting an auction",
                 );
 
                 // Send the tx and track it
-                let call = self
+                let client = self.limes.client();
+                let mut tx = self
                     .limes
                     .liquidate(
                         position.vault_id.into(),
@@ -325,116 +346,62 @@ impl<M: Middleware> Liquidator<M> {
                         position.user.into(),
                         Address::zero(),
                     )
-                    .gas_price(gas_price);
-                let tx = call.tx.clone();
-                match call.send().await {
-                    Ok(tx_hash) => {
-                        info!(tx_hash = ?tx_hash,
-                          position_id = ?hex::encode(position_id),
-                          instance_name=self.instance_name.as_str(), "Submitted liquidation");
-                        self.pending_liquidations
-                            .entry(*position_id)
-                            .or_insert((tx, *tx_hash, now));
+                    .tx;
+
+                match client.estimate_gas(&tx).await {
+                    Ok(gas_estimation) => {
+                        let sender = client.default_sender().unwrap();
+                        let nonce = client.get_transaction_count(sender, None).await.unwrap();
+                        let gas = gas_estimation
+                            .mul(U256::from(self.gas_boost + 100))
+                            .div(100);
+
+                        tx.set_gas_price(gas_price);
+                        tx.set_gas(gas);
+                        tx.set_nonce(nonce);
+
+                        let tx_signed = tx.rlp_signed(
+                            client.get_chainid().await.unwrap().as_u64(),
+                            &client.sign_transaction(&tx, sender).await.unwrap(),
+                        );
+
+                        match client.send_raw_transaction(tx_signed).await {
+                            Ok(tx_hash) => {
+                                info!(tx_hash = ?tx_hash,
+                                position_id = ?hex::encode(position_id),
+                                instance_name=self.instance_name.as_str(), "Submitted liquidation");
+                                self.pending_liquidations
+                                    .entry(*position_id)
+                                    .or_insert((tx, *tx_hash, now));
+                            }
+                            Err(x) => {
+                                warn!(
+                                position_id = ?hex::encode(position_id),
+                                error=?x,
+                                calldata=?tx.data(),
+                                "Can't start the auction. Transaction reverted."
+                                );
+                            }
+                        };
                     }
                     Err(x) => {
                         warn!(
-                          position_id = ?hex::encode(position_id),
-                          error=?x,
-                          calldata=?call.calldata(),
-                          "Can't start the auction");
+                            position_id = ?hex::encode(position_id),
+                            error=?x,
+                            "Can't start the auction. Gas estimation failed."
+                        );
                     }
-                };
+                }
             } else {
-                debug!(position_id=?hex::encode(position_id), "position is collateralized");
+                debug!(
+                    position_id=?hex::encode(position_id),
+                    vault=?H160::from(position.vault_id),
+                    token_id=?U256::from(position.token_id),
+                    user=?position.user,
+                    "position is collateralized"
+                );
             }
         }
         Ok(())
     }
-
-    // fn current_offer(&self, now: u64, auction_start: u64, duration: u64, initial_offer: u64) -> Result<u16, M> {
-    //     if now < auction_start.into() {
-    //         return Err(ContractError::ConstructorError{});
-    //     }
-    //     let one = 10u64.pow(18);
-    //     if initial_offer > one {
-    //         error!(initial_offer, "initialOffer > 1");
-    //         return Err(ContractError::ConstructorError{});
-    //     }
-    //     let initial_offer_pct = initial_offer / 10u64.pow(16); // 0-100
-
-    //     let time_since_auction_start: u64 = now - auction_start;
-    //     if time_since_auction_start >= duration {
-    //         Ok(100)
-    //     } else {
-    //         // time_since_auction_start / duration * (1 - initial_offer) + initial_offer
-    //         Ok((time_since_auction_start * (100 - initial_offer_pct) / duration + initial_offer_pct).try_into().unwrap())
-    //     }
-    // }
-
-    // async fn get_auction(&mut self, position_id: PositionIdType) -> Result<Auction, M> {
-    //     let (_, _, ilk_id) = self.cauldron.positions(position_id).call().await?;
-    //     let balances_fn = self.cauldron.balances(position_id);
-    //     let auction_fn = self.liquidator.auctions(position_id);
-
-    //     trace!(
-    //         position_id=?hex::encode(position_id),
-    //         "Fetching auction details"
-    //     );
-
-    //     let multicall = self
-    //         .multicall
-    //         .clear_calls()
-    //         .add_call(balances_fn)
-    //         .add_call(auction_fn)
-    //         .add_call(self.liquidator.ilks(ilk_id))
-    //         .add_call(self.flash_liquidator.collateral_to_debt_ratio(position_id));
-
-    //     let ((art, _), (auction_owner, auction_start), (duration, initial_offer), ratio_u256): (
-    //         (u128, u128),
-    //         (Address, u32),
-    //         (u32, u64),
-    //         U256,
-    //     ) = multicall.call().await?;
-
-    //     let current_offer: u16 = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-    //         Ok(x) => self
-    //             .current_offer(
-    //                 x.as_secs(),
-    //                 u64::from(auction_start),
-    //                 u64::from(duration),
-    //                 initial_offer,
-    //             )
-    //             .unwrap_or(0),
-    //         Err(x) => {
-    //             error!("Failed to get system time: {}", x);
-    //             0u16
-    //         }
-    //     };
-
-    //     trace!(
-    //         position_id=?hex::encode(position_id),
-    //         debt=?art,
-    //         ratio=?ratio_u256,
-    //         current_offer=current_offer,
-    //         "Fetched auction details"
-    //     );
-
-    //     let ratio_pct_u256 = ratio_u256 / U256::exp10(16);
-    //     let ratio_pct: u16 = {
-    //         if ratio_pct_u256 > U256::from(u16::MAX) {
-    //             error!(position_id=?position_id, ratio_pct_u256=?ratio_pct_u256, "Ratio is too big");
-    //             0
-    //         } else {
-    //             (ratio_pct_u256.as_u64()) as u16
-    //         }
-    //     };
-
-    //     Ok(Auction {
-    //         under_auction: (auction_owner != Address::zero()),
-    //         started: auction_start,
-    //         debt: art,
-    //         ratio_pct: ratio_pct,
-    //         // collateral_offer_is_good_enough: current_offer >= self.target_collateral_offer,
-    //     })
-    // }
 }
