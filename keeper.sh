@@ -2,8 +2,8 @@
 set -o errexit
 set -o pipefail
 
-if [ -f .env ]; then
-  set -o allexport; source .env; set +o allexport
+if [ -f /usr/bin/.env ]; then
+  set -o allexport; source /usr/bin/.env; set +o allexport
 fi
 
 if [ -z "$ALCHEMY_API_KEY" ]; then
@@ -13,17 +13,16 @@ fi
 
 set -o nounset
 
-> state.json
-
-cargo build --release
+export RUST_BACKTRACE=1
+export RUST_LOG=info
 
 # Run it with
-RUST_BACKTRACE=1 RUST_LOG=info ./target/release/main \
-    --config ./addrs.json \
-    --private-key ./private_key \
+exec /usr/bin/main \
+    --config /usr/bin/addrs.json \
+    --private-key /usr/bin/private_key \
     --url wss://eth-goerli.alchemyapi.io/v2/$ALCHEMY_API_KEY \
     --chain-id 5 \
     --interval 7000 \
     --start-block 6142980 \
-    --file state.json \
+    --file /usr/bin/state.json \
     --instance-name goerli \
