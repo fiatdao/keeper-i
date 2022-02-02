@@ -49,12 +49,12 @@ jobs:
           docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.INSTANCE }}:${{  github.sha }}
 
       # Add pruning and IP address update to VM startup script
-      - name: Update startup script to prune and update IP address
-        run: |-
-          gcloud compute instances add-metadata ${{ env.INSTANCE }} \
-          --zone ${{ env.ZONE }} \
-          --metadata=startup-script="#! /bin/bash
-           docker image prune -af"
+#      - name: Update startup script to prune old images
+#        run: |-
+#          gcloud compute instances add-metadata ${{ env.INSTANCE }} \
+#          --zone ${{ env.ZONE }} \
+#          --metadata=startup-script="#! /bin/bash
+#           docker image prune -af"
 
       - name: Deploy to Compute Engine
         run: |-
