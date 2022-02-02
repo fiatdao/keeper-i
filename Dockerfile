@@ -26,5 +26,6 @@ COPY keeper.sh /usr/bin
 COPY .env /usr/bin
 COPY private_key /usr/bin
 COPY addrs.json /usr/bin
+COPY state.json /usr/bin
 
 CMD ["/usr/bin/keeper.sh"]

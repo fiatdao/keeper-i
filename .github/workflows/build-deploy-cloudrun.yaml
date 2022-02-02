@@ -6,8 +6,8 @@ on:
 name: Build and Deploy a Container
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT }}
-  SERVICE: keeper-trigger-auctions
-  REGION: europe-north1
+  INSTANCE: keeper-trigger-auctions
+  ZONE: europe-north1-a
 
 jobs:
   deploy:
@@ -15,16 +15,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-
-      - name: Setup Cloud SDK
-        uses: google-github-actions/setup-gcloud@v0
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true  # Authenticate the Cloud Run action
-
-      - name: Authorize Docker push
-        run: gcloud auth configure-docker
 
       # Copy all secrets to the required files, create the files
       - name: Create state.json file
@@ -43,18 +33,34 @@ jobs:
           echo ${{ secrets.PRIVATE_KEY }} >> private_key
           cat private_key
 
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true  # Authenticate the Cloud Run action
+
+      - name: Authorize Docker push
+        run: gcloud auth configure-docker
+
       - name: Build and Push Container
         run: |-
-          docker build -t gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{  github.sha }} .
-          docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{  github.sha }}
+          docker build -t gcr.io/${{ env.PROJECT_ID }}/${{ env.INSTANCE }}:${{  github.sha }} .
+          docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.INSTANCE }}:${{  github.sha }}
 
-      - name: Deploy to Cloud Run
-        id: deploy
-        uses: google-github-actions/deploy-cloudrun@v0
-        with:
-          service: ${{ env.SERVICE }}
-          image: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{  github.sha }}
-          region: ${{ env.REGION }}
+      # Add pruning and IP address update to VM startup script
+      - name: Update startup script to prune and update IP address
+        run: |-
+          gcloud compute instances add-metadata ${{ env.INSTANCE }} \
+          --zone ${{ env.ZONE }} \
+          --metadata=startup-script="#! /bin/bash
+           docker image prune -af"
+
+      - name: Deploy to Compute Engine
+        run: |-
+          gcloud compute instances update-container ${{ env.INSTANCE }} \
+            --zone ${{ env.ZONE }} \
+            --container-image "gcr.io/${{ env.PROJECT_ID }}/${{ env.INSTANCE }}:${{  github.sha }}
 
       - name: Show Output
         run: echo ${{ steps.deploy.outputs.url }}
