@@ -37,8 +37,13 @@ The `--private-key` _must not_ have a `0x` prefix. Set the `interval` to 15s for
 ```sh
 # development
 ./dev.sh
-# release
+# release locally
 ./start.sh
+
+# Run as a docker
+# using ./keeper.sh
+docker build -t eu.gcr.io/${GOOGLE_PROJECT_ID}/keeper-trigger-auctions .
+docker run eu.gcr.io/fiatdao-keepers/keeper-trigger-auctions
 ```
 
 ## How it Works
