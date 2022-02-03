@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-      - gcp-ci-cd
+      - release
 
 name: Build and Deploy a Container
 env:
