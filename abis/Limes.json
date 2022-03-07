@@ -11,6 +11,104 @@
     "type": "constructor"
   },
   {
+    "inputs": [],
+    "name": "Guarded__notGranted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Guarded__notRoot",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Limes__liquidate_dustyAuctionFromPartialLiquidation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Limes__liquidate_maxDebtOnAuction",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Limes__liquidate_notLive",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Limes__liquidate_notUnsafe",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Limes__liquidate_nullAuction",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Limes__liquidate_overflow",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Limes__setParam_liquidationPenaltyLtWad",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Limes__setParam_unrecognizedParam",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "x",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y",
+        "type": "uint256"
+      }
+    ],
+    "name": "Math__add_overflow",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "x",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y",
+        "type": "uint256"
+      }
+    ],
+    "name": "Math__mul_overflow",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "x",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y",
+        "type": "uint256"
+      }
+    ],
+    "name": "Math__sub_overflow",
+    "type": "error"
+  },
+  {
     "anonymous": false,
     "inputs": [
       {

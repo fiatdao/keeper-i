@@ -3,7 +3,7 @@
 //! This module is responsible for triggering and participating in a Auction's
 //! dutch auction
 use crate::{
-    bindings::{AuctionIdType, CollateralAuction, Limes, PositionIdType},
+    bindings::{AuctionIdType, NoLossCollateralAuction, Limes, PositionIdType},
     escalator::GeometricGasPrice,
     watcher::{Auction, DiscountRateMap, Position, SpotMap, VaultMap},
     Result,
@@ -25,7 +25,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 #[derive(Clone)]
 pub struct Liquidator<M> {
     limes: Limes<M>,
-    _collateral_auction: CollateralAuction<M>,
+    _collateral_auction: NoLossCollateralAuction<M>,
 
     /// We use multicall to batch together calls and have reduced stress on
     /// our RPC endpoint
@@ -79,7 +79,7 @@ impl<M: Middleware> Liquidator<M> {
 
         Self {
             limes: Limes::new(limes, client.clone()),
-            _collateral_auction: CollateralAuction::new(collateral_auction, client.clone()),
+            _collateral_auction: NoLossCollateralAuction::new(collateral_auction, client.clone()),
             _multicall: multicall,
             gas_boost: gas_boost,
             pending_liquidations: HashMap::new(),

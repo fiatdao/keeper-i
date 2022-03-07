@@ -1,8 +1,8 @@
 mod codex;
 pub use codex::*;
 
-mod collateralauction;
-pub use collateralauction::*;
+mod nolosscollateralauction;
+pub use nolosscollateralauction::*;
 
 mod collybus;
 pub use collybus::*;
