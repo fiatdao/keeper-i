@@ -140,7 +140,7 @@ async fn run<P: JsonRpcClient + 'static>(opts: Opts, provider: Provider<P>) -> a
 
     let cfg: Config = serde_json::from_reader(std::fs::File::open(opts.config)?)?;
     info!("Codex: {:?}", cfg.codex);
-    info!("CollateralAuction: {:?}", cfg.collateral_auction);
+    info!("NoLossCollateralAuction: {:?}", cfg.collateral_auction);
     info!("Collybus: {:?}", cfg.collybus);
     info!("Limes: {:?}", cfg.limes);
     info!("Multicall2: {:?}", cfg.multicall2);

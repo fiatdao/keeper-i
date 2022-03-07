@@ -4,7 +4,7 @@
 use crate::{
     bindings::AuctionIdType,
     bindings::Codex,
-    bindings::CollateralAuction,
+    bindings::NoLossCollateralAuction,
     bindings::Collybus,
     bindings::DiscountRateIdType,
     bindings::IVault,
@@ -46,8 +46,8 @@ pub struct Watcher<M> {
     // pub liquidator: Witch<M>,
     /// Codex contract
     pub codex: Codex<M>,
-    /// CollateralAuction contract
-    pub collateral_auction: CollateralAuction<M>,
+    /// NoLossCollateralAuction contract
+    pub collateral_auction: NoLossCollateralAuction<M>,
     /// Collybus contract
     pub collybus: Collybus<M>,
     /// Base Vault contract (to be instantiated when required)
@@ -254,7 +254,7 @@ impl<M: Middleware> Watcher<M> {
         // let multicall2 = IMulticall2::new(multicall2, client.clone());
         Watcher {
             codex: Codex::new(codex, client.clone()),
-            collateral_auction: CollateralAuction::new(collateral_auction, client.clone()),
+            collateral_auction: NoLossCollateralAuction::new(collateral_auction, client.clone()),
             collybus: Collybus::new(collybus, client.clone()),
             base_vault: IVault::new(Address::zero(), client.clone()),
             limes: Limes::new(limes, client.clone()),
@@ -324,7 +324,7 @@ impl<M: Middleware> Watcher<M> {
             .from_block(from_block)
             .to_block(to_block);
 
-        // CollateralAuction
+        // NoLossCollateralAuction
         let start_auction_query = self
             .collateral_auction
             .start_auction_filter()
