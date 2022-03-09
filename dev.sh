@@ -11,6 +11,11 @@ if [ -z "$ALCHEMY_API_KEY" ]; then
   exit 1;
 fi
 
+if [ -z "$NETWORK" ]; then
+  echo "NETWORK is undefined in .env";
+  exit 1;
+fi
+
 set -o nounset
 
 > state.json
@@ -18,7 +23,7 @@ set -o nounset
 RUST_BACKTRACE=1 RUST_LOG=debug cargo run -- \
     --config ./addrs.json \
     --private-key ./private_key \
-    --url wss://eth-goerli.alchemyapi.io/v2/$ALCHEMY_API_KEY \
+    --url wss://eth-$NETWORK.alchemyapi.io/v2/$ALCHEMY_API_KEY \
     --chain-id 5 \
     --interval 7000 \
     --start-block 6142980 \
