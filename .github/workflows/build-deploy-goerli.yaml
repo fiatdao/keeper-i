@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-      - release
+      - release-goerli
 
 name: Build and Deploy a Container
 env:
@@ -25,12 +25,13 @@ jobs:
         run: |
           touch .env
           echo ALCHEMY_API_KEY=${{ secrets.ALCHEMY_API_KEY }} >> .env
+          echo NETWORK=goerli >> .env
           cat .env
 
       - name: Create private_key file
         run: |
           touch private_key
-          echo ${{ secrets.PRIVATE_KEY }} >> private_key
+          echo ${{ secrets.PRIVATE_KEY_GOERLI }} >> private_key
           cat private_key
 
       - name: Setup Cloud SDK
