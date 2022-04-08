@@ -24,7 +24,7 @@ cargo build --release
 
 # Run it with
 RUST_BACKTRACE=1 RUST_LOG=info ./target/release/main \
-    --config ./addrs.json \
+    --config ./$NETWORK.json \
     --private-key ./private_key \
     --url wss://eth-$NETWORK.alchemyapi.io/v2/$ALCHEMY_API_KEY \
     --chain-id 5 \
