@@ -23,7 +23,7 @@ export RUST_LOG=info
 
 # Run it with
 exec /usr/bin/main \
-    --config /usr/bin/addrs.json \
+    --config /usr/bin/$NETWORK.json \
     --private-key /usr/bin/private_key \
     --url wss://eth-$NETWORK.alchemyapi.io/v2/$ALCHEMY_API_KEY \
     --chain-id 5 \
