@@ -3,7 +3,7 @@
 //! This module is responsible for triggering and participating in a Auction's
 //! dutch auction
 use crate::{
-    bindings::{AuctionIdType, NoLossCollateralAuction, Limes, PositionIdType},
+    bindings::{AuctionIdType, Limes, NoLossCollateralAuction, PositionIdType},
     escalator::GeometricGasPrice,
     watcher::{Auction, DiscountRateMap, Position, SpotMap, VaultMap},
     Result,
@@ -25,7 +25,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 #[derive(Clone)]
 pub struct Liquidator<M> {
     limes: Limes<M>,
-    _collateral_auction: NoLossCollateralAuction<M>,
+    collateral_auction: NoLossCollateralAuction<M>,
 
     /// We use multicall to batch together calls and have reduced stress on
     /// our RPC endpoint
@@ -79,7 +79,7 @@ impl<M: Middleware> Liquidator<M> {
 
         Self {
             limes: Limes::new(limes, client.clone()),
-            _collateral_auction: NoLossCollateralAuction::new(collateral_auction, client.clone()),
+            collateral_auction: NoLossCollateralAuction::new(collateral_auction, client.clone()),
             _multicall: multicall,
             gas_boost: gas_boost,
             pending_liquidations: HashMap::new(),
@@ -402,6 +402,119 @@ impl<M: Middleware> Liquidator<M> {
                 );
             }
         }
+        Ok(())
+    }
+
+    #[instrument(skip(self, auction_id), fields(self.instance_name))]
+    pub async fn needs_redo(&self, auction_id: &AuctionIdType) -> bool {
+        let status = self
+            .collateral_auction
+            .get_status(auction_id.into())
+            .call()
+            .await
+            .unwrap();
+
+        if status.0 == true {
+            return true;
+        }
+
+        debug!(
+            auction_id = ?hex::encode(auction_id),
+        );
+
+        return false;
+    }
+
+    /// Triggers redo for any active auctions which has exipired or where the floor price was met
+    /// controller
+    #[instrument(skip(self, auctions, gas_price), fields(self.instance_name))]
+    pub async fn redo_auctions(
+        &mut self,
+        auctions: impl Iterator<Item = (&AuctionIdType, &Auction)>,
+        gas_price: U256,
+    ) -> Result<(), M> {
+        debug!("Checking for auctions up for redo...");
+
+        let now = Instant::now();
+
+        for (auction_id, _auction) in auctions {
+            // only iterate over auctions that do not have pending redo
+            if let Some(pending_tx) = self.pending_auctions.get(auction_id) {
+                trace!(
+                    tx_hash = ?pending_tx.1,
+                    auction_id = ?hex::encode(auction_id),
+                    "Redo not confirmed yet"
+                );
+                continue;
+            }
+
+            if self.needs_redo(auction_id).await {
+                info!(
+                    auction_id = ?hex::encode(auction_id),
+                    gas_price=?gas_price,
+                    instance_name=self.instance_name.as_str(),
+                    "Found an auction up for redo. redoing an auction",
+                );
+
+                // Send the tx and track it
+                let client = self.limes.client();
+                let mut tx = self
+                    .collateral_auction
+                    .redo_auction(auction_id.into(), Address::zero())
+                    .tx;
+
+                match client.estimate_gas(&tx).await {
+                    Ok(gas_estimation) => {
+                        let sender = client.default_sender().unwrap();
+                        let nonce = client.get_transaction_count(sender, None).await.unwrap();
+                        let gas = gas_estimation
+                            .mul(U256::from(self.gas_boost + 100))
+                            .div(100);
+
+                        tx.set_gas_price(gas_price);
+                        tx.set_gas(gas);
+                        tx.set_nonce(nonce);
+
+                        let tx_signed = tx.rlp_signed(
+                            client.get_chainid().await.unwrap().as_u64(),
+                            &client.sign_transaction(&tx, sender).await.unwrap(),
+                        );
+
+                        match client.send_raw_transaction(tx_signed).await {
+                            Ok(tx_hash) => {
+                                info!(tx_hash = ?tx_hash,
+                                auction_id = ?hex::encode(auction_id),
+                                instance_name=self.instance_name.as_str(), "Submitted Auction Redo");
+                                self.pending_auctions
+                                    .entry(*auction_id)
+                                    .or_insert((tx, *tx_hash, now));
+                            }
+                            Err(x) => {
+                                warn!(
+                                auction_id = ?hex::encode(auction_id),
+                                error=?x,
+                                calldata=?tx.data(),
+                                "Can't redo the auction. Transaction reverted."
+                                );
+                            }
+                        };
+                    }
+                    Err(x) => {
+                        warn!(
+                            auction_id = ?hex::encode(auction_id),
+                            error=?x,
+                            "Can't redo the auction. Gas estimation failed."
+                        );
+                    }
+                }
+            } else {
+                debug!(
+                    auction_id=?hex::encode(auction_id),
+                    "Auction is not up for redo"
+                );
+            }
+        }
+
         Ok(())
     }
 }
