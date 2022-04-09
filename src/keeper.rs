@@ -1,7 +1,9 @@
 use crate::{
     escalator::GeometricGasPrice,
     liquidator::Liquidator,
-    watcher::{AuctionMap, DiscountRateMap, PositionMap, SpotMap, VaultMap, ProcessedUpdateMap, Watcher},
+    watcher::{
+        AuctionMap, DiscountRateMap, PositionMap, ProcessedUpdateMap, SpotMap, VaultMap, Watcher,
+    },
     Result,
 };
 
@@ -69,15 +71,8 @@ impl<M: Middleware> Keeper<M> {
         state: Option<State>,
         instance_name: String,
     ) -> Result<Keeper<M>, M> {
-        let (
-            vaults,
-            positions,
-            rates,
-            spots,
-            auctions,
-            processed_updates,
-            last_block
-        ) = match state {
+        let (vaults, positions, rates, spots, auctions, processed_updates, last_block) = match state
+        {
             Some(state) => (
                 state.vaults,
                 state.positions,
@@ -291,6 +286,12 @@ impl<M: Middleware> Keeper<M> {
                 gas_price,
             )
             .await?;
+
+        // 4. trigger redo for any auctions up for redo
+        self.liquidator
+            .redo_auctions(self.watcher.auctions.iter(), gas_price)
+            .await?;
+
         Ok(())
     }
 
