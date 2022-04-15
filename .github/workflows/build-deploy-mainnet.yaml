@@ -30,7 +30,7 @@ jobs:
       - name: Create env file
         run: |
           touch .env
-          echo ALCHEMY_API_KEY=${{ secrets.ALCHEMY_API_KEY }} >> .env
+          echo ALCHEMY_API_KEY=${{ secrets.ALCHEMY_API_KEY_MAINNET }} >> .env
           echo NETWORK=goerli >> .env
           cat .env
 
