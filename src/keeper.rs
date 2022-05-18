@@ -1,8 +1,10 @@
 use crate::{
     escalator::GeometricGasPrice,
-    liquidator::Liquidator,
+    liquidator::{
+        Liquidator, CachedPositionMap
+    },
     watcher::{
-        AuctionMap, DiscountRateMap, PositionMap, ProcessedUpdateMap, SpotMap, VaultMap, Watcher,
+        AuctionMap, DiscountRateMap, PositionMap, ProcessedUpdateMap, SpotMap, VaultMap, Watcher
     },
     Result,
 };
@@ -35,9 +37,12 @@ pub struct State {
     /// The auctions being monitored
     #[serde_as(as = "Vec<(_, _)>")]
     auctions: AuctionMap,
-    /// Processed Updates (used for avoiding reorgs)
+    /// Processed updates (used for avoiding reorgs)
     #[serde_as(as = "Vec<(_, _)>")]
     processed_updates: ProcessedUpdateMap,
+    /// Cached positions
+    #[serde_as(as = "Vec<(_, _)>")]
+    cached_positions: CachedPositionMap,    
     /// The last observed block
     last_block: u64,
 }
@@ -305,6 +310,7 @@ impl<M: Middleware> Keeper<M> {
                 spots: self.watcher.spots.clone(),
                 auctions: self.watcher.auctions.clone(),
                 processed_updates: self.watcher.processed_updates.clone(),
+                cached_positions: self.liquidator.cached_positions.clone(),
                 last_block: self.last_block.as_u64(),
             },
         )
