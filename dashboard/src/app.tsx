@@ -11,10 +11,9 @@ function App() {
     const [lastBlock, setLastBlock] = React.useState(0);
 
     React.useEffect(() => {
-        console.log(positions, lastBlock);
         if (positions.length == 0 || lastBlock == 0) {
-            try {
-                (async () => {
+            (async () => {
+                try {
                     const response = await fetch('http://localhost:9000/');
                     const state = await response.json();
                     const lastBlock = state['last_block'];
@@ -27,8 +26,8 @@ function App() {
                     });
                     setPositions(positions);
                     setLastBlock(lastBlock);
-                })();
-            } catch (error) { console.error(error); }
+                } catch (error) { console.error(error) }
+            })();
         }
       }, []);
 

@@ -2,7 +2,7 @@
   "name": "dashboard",
   "version": "0.0.0",
   "scripts": {
-    "start-app": "esbuild src/app.tsx --outdir=build --bundle --servedir=build",
+    "start-app": "esbuild src/app.tsx --bundle --outdir=www --servedir=www",
     "start-server": "nodemon server.js"
   },
   "devDependencies": {
