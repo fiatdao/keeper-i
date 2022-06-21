@@ -30,4 +30,4 @@ exec /usr/bin/main \
     --interval 7000 \
     --start-block 6142980 \
     --file /usr/bin/state.json \
-    --instance-name goerli \
+    --instance-name $NETWORK \

@@ -1,22 +1,28 @@
 on:
   push:
     branches:
-      - release-goerli
+      - main
 
-name: Build and Deploy a Container
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image version'
+        required: true
+#2
 env:
-  PROJECT_ID: ${{ secrets.GCP_PROJECT }}
-  INSTANCE: keeper-trigger-auctions
-  ZONE: europe-north1-a
+  REGISTRY: "registry.digitalocean.com/fiatdao-registry"
+  IMAGE_NAME: "fiatdao-keeper-goerli"
 
+#3
 jobs:
-  deploy:
+  build_and_push:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout the repo
         uses: actions/checkout@v2
 
-      # Copy all secrets to the required files, create the files
+       # Copy all secrets to the required files, create the files
       - name: Create state.json file
         run: |
           touch state.json
@@ -24,7 +30,7 @@ jobs:
       - name: Create env file
         run: |
           touch .env
-          echo ALCHEMY_API_KEY=${{ secrets.ALCHEMY_API_KEY }} >> .env
+          echo ALCHEMY_API_KEY=${{ secrets.ALCHEMY_API_KEY_GOERLI }} >> .env
           echo NETWORK=goerli >> .env
           cat .env
 
@@ -34,34 +40,45 @@ jobs:
           echo ${{ secrets.PRIVATE_KEY_GOERLI }} >> private_key
           cat private_key
 
-      - name: Setup Cloud SDK
-        uses: google-github-actions/setup-gcloud@v0
+      - name: Build container image
+        run: docker build -t $(echo $REGISTRY)/$(echo $IMAGE_NAME):$(echo $GITHUB_SHA | head -c7) .
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
         with:
-          project_id: ${{ env.PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true  # Authenticate the Cloud Run action
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-      - name: Authorize Docker push
-        run: gcloud auth configure-docker
+      - name: Log in to DigitalOcean Container Registry with short-lived credentials
+        run: doctl registry login --expiry-seconds 600
 
-      - name: Build and Push Container
-        run: |-
-          docker build -t gcr.io/${{ env.PROJECT_ID }}/${{ env.INSTANCE }}:${{  github.sha }} .
-          docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.INSTANCE }}:${{  github.sha }}
+      - name: Remove all old images
+        run: if [ ! -z "$(doctl registry repository list | grep "$(echo $IMAGE_NAME)")" ]; then doctl registry repository delete-manifest $(echo $IMAGE_NAME) $(doctl registry repository list-tags $(echo $IMAGE_NAME) | grep -o "sha.*") --force; else echo "No repository"; fi
 
-      # Add pruning and IP address update to VM startup script
-      - name: Update startup script to prune old images
-        run: |-
-          gcloud compute instances add-metadata ${{ env.INSTANCE }} \
-          --zone ${{ env.ZONE }} \
-          --metadata=startup-script="#! /bin/bash
-           docker image prune -af"
+      - name: Push image to DigitalOcean Container Registry
+        run: docker push $(echo $REGISTRY)/$(echo $IMAGE_NAME):$(echo $GITHUB_SHA | head -c7)
 
-      - name: Deploy to Compute Engine
-        run: |-
-          gcloud compute instances update-container ${{ env.INSTANCE }} \
-            --zone ${{ env.ZONE }} \
-            --container-image gcr.io/${{ env.PROJECT_ID }}/${{ env.INSTANCE }}:${{  github.sha }}
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build_and_push
 
-      - name: Show Output
-        run: echo ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Deploy to Digital Ocean droplet via SSH action
+        uses: appleboy/ssh-action@v0.1.3
+        with:
+          host: ${{ secrets.HOST_GOERLI }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSHKEY }}
+          passphrase: ${{ secrets.PASSPHRASE }}
+          envs: IMAGE_NAME,REGISTRY,{{ secrets.DIGITALOCEAN_ACCESS_TOKEN }},GITHUB_SHA
+          script: |
+            # Login to registry
+            docker login -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} registry.digitalocean.com
+            # Stop running container
+            docker stop $(echo $IMAGE_NAME)
+            # Remove old container
+            docker rm $(echo $IMAGE_NAME)
+            # Run a new container from a new image
+            docker run -d \
+            --restart always \
+            --name $(echo $IMAGE_NAME) \
+            $(echo $REGISTRY)/$(echo $IMAGE_NAME):$(echo $GITHUB_SHA | head -c7)
