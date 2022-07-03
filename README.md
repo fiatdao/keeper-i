@@ -1,9 +1,9 @@
 # Keeper Service
 
-Liquidates undercollateralized positions.
+Triggers and maintains auctions for liquidated positions.
 
 This service altruistically calls the `Limes.liquidate` function for any
-position that is underwater, triggering an auction for that position.
+position that is undercollateralized, triggering an auction for that position.
 
 ## CLI
 
@@ -24,11 +24,11 @@ Optional arguments:
 ```
 
 Your contracts' `--config` file should be in the following format where:
- * `Codex` is the address of the Codex
- * `CollateralAuction` is the address of the CollateralAuction
- * `Collybus` is the address of the Collybus
- * `Limes` is the address of the Limes
- * `Multicall` is the address of the Multicall (https://github.com/makerdao/multicall)
+ * `Codex` is the address of Codex (see fiatdao/fiat)
+ * `CollateralAuction` is the address of CollateralAuction / NoLossCollateralAuction (see fiatdao/fiat)
+ * `Collybus` is the address of Collybus (see fiatdao/fiat)
+ * `Limes` is the address of Limes (see fiatdao/fiat)
+ * `Multicall` is the address of Multicall (https://github.com/makerdao/multicall)
 
 The `--private-key` _must not_ have a `0x` prefix. Set the `interval` to 15s for mainnet.
 
@@ -39,11 +39,6 @@ The `--private-key` _must not_ have a `0x` prefix. Set the `interval` to 15s for
 ./dev.sh
 # release locally
 ./start.sh
-
-# Run as a docker
-# using ./keeper.sh
-docker build -t eu.gcr.io/${GOOGLE_PROJECT_ID}/keeper-trigger-auctions .
-docker run eu.gcr.io/fiatdao-keepers/keeper-trigger-auctions
 ```
 
 ## How it Works
