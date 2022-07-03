@@ -214,7 +214,7 @@ impl<M: Middleware> Keeper<M> {
                         }
                     }
 
-                    if block_number % 10 == 0.into() {
+                    if block_number % 5 == 0.into() {
                         // on each new block we open a new file handler to dump our state.
                         // we should just have a database connection instead here...
                         file = Some(
