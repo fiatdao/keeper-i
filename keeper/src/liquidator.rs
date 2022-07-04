@@ -1,7 +1,6 @@
 //! Auctions Module
 //!
-//! This module is responsible for triggering and participating in a Auction's
-//! dutch auction
+//! This module is responsible for triggering and managing Auction's
 use crate::{
     bindings::{AuctionIdType, Limes, NoLossCollateralAuction, PositionIdType},
     escalator::GeometricGasPrice,
@@ -13,6 +12,7 @@ use decimal_rs::Decimal;
 use ethers::{prelude::*, utils::parse_units, utils::WEI_IN_ETHER};
 use ethers_core::types::transaction::eip2718::TypedTransaction;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use std::{
     collections::HashMap,
     fmt,
@@ -21,6 +21,9 @@ use std::{
     time::{Instant, SystemTime},
 };
 use tracing::{debug, error, info, instrument, trace, warn};
+
+// Map of cached positions
+pub type CachedPositionMap = HashMap<PositionIdType, CachedPosition>;
 
 #[derive(Clone)]
 pub struct Liquidator<M> {
@@ -39,11 +42,26 @@ pub struct Liquidator<M> {
     gas_escalator: GeometricGasPrice,
     bump_gas_delay: u64,
 
+    pub cached_positions: HashMap<PositionIdType, CachedPosition>,
+
     instance_name: String,
 }
 
 /// Tx / Hash/ Submitted at time
 type PendingTransaction = (TypedTransaction, TxHash, Instant);
+
+#[serde_as]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Cached Position
+pub struct CachedPosition {
+    position_id: PositionIdType,
+    vault: H160,
+    token_id: U256,
+    owner: H160,
+    collateral_value: U256,
+    debt: U256,
+    health_factor: U256,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum TxType {
@@ -84,6 +102,7 @@ impl<M: Middleware> Liquidator<M> {
             gas_boost: gas_boost,
             pending_liquidations: HashMap::new(),
             pending_auctions: HashMap::new(),
+            cached_positions: HashMap::new(),
             gas_escalator,
             bump_gas_delay,
             instance_name,
@@ -207,7 +226,7 @@ impl<M: Middleware> Liquidator<M> {
 
     #[instrument(skip(self, position_id, position, vaults, rates, spots), fields(self.instance_name))]
     pub fn is_collateralized(
-        &self,
+        &mut self,
         position_id: &PositionIdType,
         position: &Position,
         vaults: &VaultMap,
@@ -279,6 +298,28 @@ impl<M: Middleware> Liquidator<M> {
             .unwrap()
             .checked_div(WEI_IN_ETHER)
             .unwrap();
+
+        let health_factor = match debt.eq(&U256::zero()) {
+            true => U256::MAX,
+            false => collateral_value
+                .checked_mul(WEI_IN_ETHER)
+                .unwrap()
+                .checked_div(debt)
+                .unwrap()
+        };
+
+        self.cached_positions.insert(
+            position_id.clone(),
+            CachedPosition {
+                position_id: position_id.clone(),
+                vault: position.vault_id.into(),
+                token_id: position.token_id.into(),
+                owner: position.user,
+                collateral_value,
+                debt,
+                health_factor,
+            },
+        );
 
         if collateral_value.ge(&debt) {
             return true;
@@ -402,6 +443,7 @@ impl<M: Middleware> Liquidator<M> {
                 );
             }
         }
+
         Ok(())
     }
 

@@ -7,7 +7,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 # build dependencies - they're not changed frequently
 WORKDIR /usr/src/
 COPY Cargo.* ./
-COPY Cargo.toml .
 RUN mkdir -p src/bin \
     && echo "//" > src/lib.rs \
     && echo "fn main() {}" > src/bin/main.rs \
@@ -27,6 +26,7 @@ COPY .env /usr/bin
 COPY private_key /usr/bin
 COPY goerli.json /usr/bin
 COPY mainnet.json /usr/bin
-COPY state.json /usr/bin
+RUN mkdir -p /usr/bin/data
+COPY state.json /usr/bin/data
 
 CMD ["/usr/bin/keeper.sh"]

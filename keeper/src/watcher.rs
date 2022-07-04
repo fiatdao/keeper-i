@@ -25,7 +25,6 @@ use serde_with::serde_as;
 use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, debug_span, info, instrument};
 
-pub type ProcessedUpdateMap = HashMap<UpdateIdType, bool>;
 /// Map of vaults
 pub type VaultMap = HashMap<VaultIdType, Vault>;
 /// Map of positions
@@ -34,12 +33,14 @@ pub type PositionMap = HashMap<PositionIdType, Position>;
 pub type DiscountRateMap = HashMap<DiscountRateIdType, DiscountRate>;
 /// Map of underlier spot prices
 pub type SpotMap = HashMap<SpotIdType, Spot>;
-// / Map of auctions
+// Map of auctions
 pub type AuctionMap = HashMap<AuctionIdType, Auction>;
-// / Map of maturities
+// Map of maturities
 pub type MaturityMap = HashMap<TokenIdType, U256>;
-// / Map of maturities
+// Map of discount rate ids
 pub type DiscountRateIdMap = HashMap<TokenIdType, U256>;
+/// Map of processed updates
+pub type ProcessedUpdateMap = HashMap<UpdateIdType, bool>;
 
 #[derive(Clone)]
 pub struct Watcher<M> {
