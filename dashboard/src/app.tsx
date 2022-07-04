@@ -1,6 +1,6 @@
 import * as React from 'react'
 import ReactDOM from 'react-dom'
-import BigNumber from 'BigNumber.js';
+import BigNumber from 'bignumber.js';
 
 import './app.css';
 

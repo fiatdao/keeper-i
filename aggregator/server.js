@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.static('public'));
 
 app.use((req, res, next) => {
-  res.sendFile(path.join(__dirname, '..', 'state.json'));
+  res.sendFile(path.join(__dirname, '../data', 'state.json'));
 });
 
 app.listen(9000, () => {

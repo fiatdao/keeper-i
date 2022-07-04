@@ -1,0 +1,14 @@
+# MacOS
+.DS_Store
+
+# rust
+/target
+
+# secrets
+.env
+private_key
+private_key.mainnet
+private_key.goerli
+
+# keeper-service
+state.json

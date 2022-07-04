@@ -1,4 +1,4 @@
-# Keeper Service
+# Keeper
 
 Triggers and maintains auctions for liquidated positions.
 

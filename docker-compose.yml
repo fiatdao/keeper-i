@@ -1,0 +1,26 @@
+version: "3.9"
+services:
+  keeper:
+    image: ${REGISTRY}/keeper-service/keeper:${TAG}
+    build: ./keeper
+    volumes:
+      - data:/usr/bin/data
+    restart: always
+  aggregator:
+    image: ${REGISTRY}/keeper-service/aggregator:${TAG}
+    build: ./aggregator
+    restart: always
+    volumes:
+      - data:/usr/data
+    ports:
+      - '9000:9000'
+    restart: always
+  dashboard:
+    image: ${REGISTRY}/keeper-service/dashboard:${TAG}
+    build: ./dashboard
+    ports:
+      - '8000:8000'
+    restart: always
+
+volumes:
+  data:

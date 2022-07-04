@@ -29,5 +29,5 @@ exec /usr/bin/main \
     --chain-id 5 \
     --interval 7000 \
     --start-block 6142980 \
-    --file /usr/bin/state.json \
+    --file /usr/bin/data/state.json \
     --instance-name $NETWORK \

@@ -2,17 +2,13 @@
   "name": "dashboard",
   "version": "0.0.0",
   "scripts": {
-    "start-app": "esbuild src/app.tsx --bundle --outdir=www --servedir=www",
-    "start-server": "nodemon server.js"
+    "start": "esbuild src/app.tsx --bundle --outdir=www --servedir=www"
   },
   "devDependencies": {
     "@types/react": "^18.0.9",
     "@types/react-dom": "^18.0.4",
     "bignumber.js": "^9.0.2",
-    "cors": "^2.8.5",
     "esbuild": "^0.14.39",
-    "express": "^4.18.1",
-    "nodemon": "^2.0.16",
     "react": "^18.1.0",
     "react-dom": "^18.1.0"
   }

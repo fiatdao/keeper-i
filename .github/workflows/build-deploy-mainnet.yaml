@@ -9,12 +9,10 @@ on:
       version:
         description: 'Image version'
         required: true
-#2
+
 env:
   REGISTRY: "registry.digitalocean.com/fiatdao-registry"
-  IMAGE_NAME: "fiatdao-keeper"
 
-#3
 jobs:
   build_and_push:
     runs-on: ubuntu-latest
@@ -22,26 +20,20 @@ jobs:
       - name: Checkout the repo
         uses: actions/checkout@v2
 
-      # Copy all secrets to the required files, create the files
-      - name: Create state.json file
-        run: |
-          touch state.json
+      - name: Set env
+        run: echo "TAG=$(echo $GITHUB_SHA | head -c7)" >> $GITHUB_ENV
 
-      - name: Create env file
+      - name: Setup local files
         run: |
-          touch .env
-          echo ALCHEMY_API_KEY=${{ secrets.ALCHEMY_API_KEY_MAINNET }} >> .env
-          echo NETWORK=mainnet >> .env
-          cat .env
+          touch keeper/state.json
+          touch keeper/.env
+          echo ALCHEMY_API_KEY=${{ secrets.ALCHEMY_API_KEY_MAINNET }} >> keeper/.env
+          echo NETWORK=mainnet >> keeper/.env
+          touch keeper/private_key
+          echo ${{ secrets.PRIVATE_KEY_MAINNET }} >> keeper/private_key
 
-      - name: Create private_key file
-        run: |
-          touch private_key
-          echo ${{ secrets.PRIVATE_KEY_MAINNET }} >> private_key
-          cat private_key
-
-      - name: Build container image
-        run: docker build -t $(echo $REGISTRY)/$(echo $IMAGE_NAME):$(echo $GITHUB_SHA | head -c7) .
+      - name: Build container images
+        run: REGISTRY=$(echo $REGISTRY) TAG=$(echo $TAG) docker compose build
 
       - name: Install doctl
         uses: digitalocean/action-doctl@v2
@@ -52,10 +44,10 @@ jobs:
         run: doctl registry login --expiry-seconds 600
 
       - name: Remove all old images
-        run: if [ ! -z "$(doctl registry repository list | grep "$(echo $IMAGE_NAME)")" ]; then doctl registry repository delete-manifest $(echo $IMAGE_NAME) $(doctl registry repository list-tags $(echo $IMAGE_NAME) | grep -o "sha.*") --force; else echo "No repository"; fi
+        run: echo "Todo"
 
       - name: Push image to DigitalOcean Container Registry
-        run: docker push $(echo $REGISTRY)/$(echo $IMAGE_NAME):$(echo $GITHUB_SHA | head -c7)
+        run: REGISTRY=$(echo $REGISTRY) TAG=$(echo $TAG) docker compose push
 
   deploy:
     runs-on: ubuntu-latest
@@ -69,16 +61,9 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSHKEY }}
           passphrase: ${{ secrets.PASSPHRASE }}
-          envs: IMAGE_NAME,REGISTRY,{{ secrets.DIGITALOCEAN_ACCESS_TOKEN }},GITHUB_SHA
+          envs: REGISTRY,{{ secrets.DIGITALOCEAN_ACCESS_TOKEN }},TAG
           script: |
-            # Login to registry
             docker login -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} registry.digitalocean.com
-            # Stop running container
-            docker stop $(echo $IMAGE_NAME)
-            # Remove old container
-            docker rm $(echo $IMAGE_NAME)
-            # Run a new container from a new image
-            docker run -d \
-            --restart always \
-            --name $(echo $IMAGE_NAME) \
-            $(echo $REGISTRY)/$(echo $IMAGE_NAME):$(echo $GITHUB_SHA | head -c7)
+            docker compose stop
+            docker compose rm --force
+            docker compose up
