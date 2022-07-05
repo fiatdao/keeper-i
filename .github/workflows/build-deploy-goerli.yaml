@@ -60,6 +60,7 @@ jobs:
           host: ${{ secrets.HOST_GOERLI }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSHKEY }}
+          password: ${{ secrets.PASSPHRASE }}
           source: "docker-compose.yml,docker-compose.yml"
           target: ""
       
