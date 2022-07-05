@@ -51,29 +51,29 @@ jobs:
     runs-on: ubuntu-latest
     needs: build_and_push
     steps:
-    - name: Checkout the repo
-      uses: actions/checkout@v2
+      - name: Checkout the repo
+        uses: actions/checkout@v2
 
-    - name: copy file via ssh password
-      uses: appleboy/scp-action@master
-      with:
-        host: ${{ secrets.HOST_GOERLI }}
-        username: ${{ secrets.USERNAME }}
-        key: ${{ secrets.SSHKEY }}
-        source: "docker-compose.yml,docker-compose.yml"
-        target: ""
-    
-      - name: Deploy to Digital Ocean droplet via SSH action
-        uses: appleboy/ssh-action@v0.1.3
+      - name: copy file via ssh password
+        uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.HOST_GOERLI }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSHKEY }}
-          passphrase: ${{ secrets.PASSPHRASE }}
-          envs: REGISTRY,{{ secrets.DIGITALOCEAN_ACCESS_TOKEN }},TAG
-          script: |
-            docker login -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} registry.digitalocean.com
-            docker stop $(docker ps -q)
-            docker rmi $(docker images -q)
-            docker compose start
-            
+          source: "docker-compose.yml,docker-compose.yml"
+          target: ""
+      
+        - name: Deploy to Digital Ocean droplet via SSH action
+          uses: appleboy/ssh-action@v0.1.3
+          with:
+            host: ${{ secrets.HOST_GOERLI }}
+            username: ${{ secrets.USERNAME }}
+            key: ${{ secrets.SSHKEY }}
+            passphrase: ${{ secrets.PASSPHRASE }}
+            envs: REGISTRY,{{ secrets.DIGITALOCEAN_ACCESS_TOKEN }},TAG
+            script: |
+              docker login -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} registry.digitalocean.com
+              docker stop $(docker ps -q)
+              docker rmi $(docker images -q)
+              docker compose start
+              
