@@ -449,12 +449,15 @@ impl<M: Middleware> Liquidator<M> {
 
     #[instrument(skip(self, auction_id), fields(self.instance_name))]
     pub async fn needs_redo(&self, auction_id: &AuctionIdType) -> bool {
-        let status = self
+        let status = match self
             .collateral_auction
             .get_status(auction_id.into())
             .call()
-            .await
-            .unwrap();
+            .await {
+                Ok(status) => status,
+                Err(_) => (false, U256::MAX, U256::MAX, U256::MAX)
+            };
+        
 
         if status.0 == true {
             return true;
