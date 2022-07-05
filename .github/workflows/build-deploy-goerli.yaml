@@ -75,5 +75,6 @@ jobs:
             docker login -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} registry.digitalocean.com
             docker stop $(docker ps -q)
             docker rmi $(docker images -q)
+            docker volume rm $(docker volume ls -q)
             REGISTRY=$(echo $REGISTRY) TAG=$(echo $TAG) docker compose pull
             REGISTRY=$(echo $REGISTRY) TAG=$(echo $TAG) docker compose up -d
