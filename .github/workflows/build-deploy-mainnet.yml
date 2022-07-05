@@ -74,8 +74,7 @@ jobs:
           script: |
             docker login -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} registry.digitalocean.com
             docker stop $(docker ps -q)
-            docker rmi $(docker images -q)
-            docker volume rm $(docker volume ls -q)
+            docker system prune --all --volumes --force
             REGISTRY=$(echo $REGISTRY) TAG=$(echo $TAG) docker compose pull
             REGISTRY=$(echo $REGISTRY) TAG=$(echo $TAG) docker compose up -d
             rm docker-compose.yml
