@@ -1,6 +1,6 @@
 FROM node:14.19.1-alpine
 WORKDIR /usr/src/
 ADD . .
-RUN yarn install
+RUN yarn install && yarn build
 CMD [ "yarn", "start" ]
-EXPOSE 9000
+EXPOSE 8000

@@ -1,35 +1,12 @@
 import * as React from 'react'
-import ReactDOM from 'react-dom'
 import BigNumber from 'bignumber.js';
 
 import './app.css';
 
 const U256_MAX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
 
-function App() {
-    const [positions, setPositions] = React.useState([]);
-    const [lastBlock, setLastBlock] = React.useState(0);
-
-    React.useEffect(() => {
-        if (positions.length == 0 || lastBlock == 0) {
-            (async () => {
-                try {
-                    const response = await fetch('http://localhost:9000/');
-                    const state = await response.json();
-                    const lastBlock = state['last_block'];
-                    const positions = state['cached_positions'].sort((a, b) => {
-                        // @ts-ignore
-                        if (new BigNumber(a[1].health_factor).lt(b[1].health_factor)) return -1;
-                        // @ts-ignore
-                        if (new BigNumber(a[1].health_factor).gt(b[1].health_factor)) return 1;
-                        return 0;
-                    });
-                    setPositions(positions);
-                    setLastBlock(lastBlock);
-                } catch (error) { console.error(error) }
-            })();
-        }
-      }, []);
+export function App(props) {
+    const { positions, lastBlock } = props;
 
     return (
         <div>
@@ -51,7 +28,7 @@ function App() {
                         // @ts-ignore
                         const vault = position[1].vault;
                         // @ts-ignore
-                        const tokenId = new BigNumber(position[1].token_id).toFormat();
+                        const tokenId = new BigNumber(position[1].token_id).toString();
                         // @ts-ignore
                         const owner = position[1].owner;
                         // @ts-ignore
@@ -76,8 +53,5 @@ function App() {
                 </tbody>
             </table>
         </div>
-        
     )
 }
-
-ReactDOM.render(<App />, document.querySelector('#root'))

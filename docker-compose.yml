@@ -13,12 +13,6 @@ services:
     volumes:
       - data:/usr/data
     ports:
-      - '9000:9000'
-    restart: always
-  dashboard:
-    image: ${REGISTRY}/keeper-service/dashboard:${TAG}
-    build: ./dashboard
-    ports:
       - '8000:8000'
     restart: always
 
