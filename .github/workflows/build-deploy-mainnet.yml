@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: "registry.digitalocean.com/fiatdao-registry"
-  TAG: "latest"
+  TAG: "latest-mainnet"
 
 jobs:
   build_and_push_images:
