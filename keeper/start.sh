@@ -24,10 +24,11 @@ cargo build --release
 
 # Run it with
 RUST_BACKTRACE=1 RUST_LOG=info ./target/release/main \
-    --config ./$NETWORK.json \
+    --config ./lib/changelog-i/deployment/deployment-$NETWORK.json \
     --private-key ./private_key \
     --url wss://eth-$NETWORK.alchemyapi.io/v2/$ALCHEMY_API_KEY \
     --chain-id 5 \
+    --multicall2 0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696 \
     --interval 7000 \
     --start-block 6142980 \
     --file state.json \

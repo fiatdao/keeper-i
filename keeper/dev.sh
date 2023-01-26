@@ -21,7 +21,7 @@ set -o nounset
 > state.json
 
 RUST_BACKTRACE=1 RUST_LOG=debug cargo run -- \
-    --config ./$NETWORK.json \
+    --config ./lib/changelog-i/deployment/deployment-$NETWORK.json \
     --private-key ./private_key \
     --url wss://eth-$NETWORK.alchemyapi.io/v2/$ALCHEMY_API_KEY \
     --chain-id 5 \
