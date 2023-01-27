@@ -30,6 +30,9 @@ struct Opts {
     #[options(help = "polling interval (ms)", default = "1000")]
     interval: u64,
 
+    #[options(help = "Multicall2 contract address ", default = "0x5ba1e12693dc8f9c48aad8770482f4739beed696")]
+    multicall2: Address,
+
     #[options(help = "Multicall batch size", default = "1000")]
     multicall_batch_size: usize,
 
@@ -62,17 +65,17 @@ struct Opts {
 }
 
 #[derive(Deserialize)]
+struct ConfigField{
+    address: Address,
+}
+
+#[derive(Deserialize)]
 struct Config {
-    #[serde(rename = "Codex")]
-    codex: Address,
-    #[serde(rename = "CollateralAuction")]
-    collateral_auction: Address,
-    #[serde(rename = "Collybus")]
-    collybus: Address,
-    #[serde(rename = "Multicall2")]
-    multicall2: Address,
-    #[serde(rename = "Limes")]
-    limes: Address,
+    codex: ConfigField,
+    #[serde(rename = "collateralAuction")]
+    collateral_auction: ConfigField,
+    collybus: ConfigField,
+    limes: ConfigField
 }
 
 fn init_logger(use_json: bool) {
@@ -139,11 +142,11 @@ async fn run<P: JsonRpcClient + 'static>(opts: Opts, provider: Provider<P>) -> a
     );
 
     let cfg: Config = serde_json::from_reader(std::fs::File::open(opts.config)?)?;
-    info!("Codex: {:?}", cfg.codex);
-    info!("NoLossCollateralAuction: {:?}", cfg.collateral_auction);
-    info!("Collybus: {:?}", cfg.collybus);
-    info!("Limes: {:?}", cfg.limes);
-    info!("Multicall2: {:?}", cfg.multicall2);
+    info!("Codex: {:?}", cfg.codex.address);
+    info!("NoLossCollateralAuction: {:?}", cfg.collateral_auction.address);
+    info!("Collybus: {:?}", cfg.collybus.address);
+    info!("Limes: {:?}", cfg.limes.address);
+    info!("Multicall2: {:?}", opts.multicall2);
     info!("Persistent data will be stored at: {:?}", opts.file);
 
     let file = std::fs::OpenOptions::new()
@@ -161,11 +164,11 @@ async fn run<P: JsonRpcClient + 'static>(opts: Opts, provider: Provider<P>) -> a
 
     let mut keeper = Keeper::new(
         client,
-        cfg.codex,
-        cfg.collateral_auction,
-        cfg.collybus,
-        cfg.limes,
-        cfg.multicall2,
+        cfg.codex.address,
+        cfg.collateral_auction.address,
+        cfg.collybus.address,
+        cfg.limes.address,
+        opts.multicall2,
         opts.multicall_batch_size,
         opts.gas_boost,
         gas_escalator,
@@ -173,7 +176,7 @@ async fn run<P: JsonRpcClient + 'static>(opts: Opts, provider: Provider<P>) -> a
         state,
         format!(
             "{}.codex={:?}.collateral_auction={:?}.collybus={:?}.limes={:?}",
-            opts.instance_name, cfg.codex, cfg.collateral_auction, cfg.collybus, cfg.limes
+            opts.instance_name, cfg.codex.address, cfg.collateral_auction.address, cfg.collybus.address, cfg.limes.address
         ),
     )
     .await?;

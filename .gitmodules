@@ -1,0 +1,3 @@
+[submodule "keeper/lib/changelog-i"]
+	path = keeper/lib/changelog-i
+	url = https://github.com/fiatdao/changelog-i

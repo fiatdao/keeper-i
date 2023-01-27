@@ -24,8 +24,8 @@ COPY --from=builder /usr/src/target/release/main /usr/bin
 COPY keeper.sh /usr/bin
 COPY .env /usr/bin
 COPY private_key /usr/bin
-COPY goerli.json /usr/bin
-COPY mainnet.json /usr/bin
+COPY ./lib/changelog-i/deployment/deployment-goerli.json /usr/bin
+COPY ./lib/changelog-i/deployment/deployment-mainnet.json /usr/bin
 RUN mkdir -p /usr/bin/data
 COPY state.json /usr/bin/data
 
