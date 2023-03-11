@@ -12,7 +12,7 @@ const server = express();
 server.get('/', async (req, res) => {
     try {
         const file = path.join(__dirname, '../../data', 'state.json');
-        const state = (fs.existsSync(file)) ? JSON.parse(fs.readFileSync(file)) : {};
+        const state = (fs.existsSync(file)) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
 
         const lastBlock = (Object.keys(state).length != 0) ? state['last_block'] : 0;
         const positions = (Object.keys(state).length != 0) ? state['cached_positions'].sort((a, b) => {
@@ -35,7 +35,8 @@ server.get('/', async (req, res) => {
                 <script src="app.js" async defer></script>
             </body>
             </html>
-        `
+        `;
+
         res.send(html);
 
     } catch (error) { console.error(error) }

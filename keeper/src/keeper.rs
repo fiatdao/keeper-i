@@ -268,11 +268,11 @@ impl<M: Middleware> Keeper<M> {
     #[instrument(skip(self), fields(self.instance_name))]
     async fn on_block(&mut self, block_number: U64) -> Result<(), M> {
         // Get the gas price - TODO: Replace with gas price oracle
-        // let gas_price = self
-        //     .client
-        //     .get_gas_price()
-        //     .await
-        //     .map_err(ContractError::MiddlewareError)?;
+        let gas_price = self
+            .client
+            .get_gas_price()
+            .await
+            .map_err(ContractError::MiddlewareError)?;
 
         // 1. Check if our transactions have been mined
         self.liquidator.remove_or_bump().await?;
@@ -280,17 +280,17 @@ impl<M: Middleware> Keeper<M> {
         // 2. update our dataset with the new block's data
         self.watcher.sync(self.last_block, block_number).await?;
 
-        // // 3. trigger the auction for any undercollateralized borrowers
-        // self.liquidator
-        //     .start_auctions(
-        //         self.watcher.auctions.iter(),
-        //         self.watcher.positions.iter(),
-        //         &self.watcher.vaults,
-        //         &self.watcher.rates,
-        //         &self.watcher.spots,
-        //         gas_price,
-        //     )
-        //     .await?;
+        // 3. trigger the auction for any undercollateralized borrowers
+        self.liquidator
+            .start_auctions(
+                self.watcher.auctions.iter(),
+                self.watcher.positions.iter(),
+                &self.watcher.vaults,
+                &self.watcher.rates,
+                &self.watcher.spots,
+                gas_price,
+            )
+            .await?;
 
         // // 4. trigger redo for any auctions up for redo
         // self.liquidator
